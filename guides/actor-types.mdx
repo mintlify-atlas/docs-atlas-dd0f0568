@@ -1,0 +1,261 @@
+---
+title: "Actor Types"
+description: "A reference for every actor type in the PF2e system, from player characters to army units."
+---
+
+Every entity that appears in a Foundry VTT scene — a character, a monster, a trap, a ship — is represented by a subclass of `ActorPF2e`. The base class provides the shared foundation: inventory, conditions, rule elements, auras, saving throws, and the damage application pipeline. Concrete actor types extend this foundation with the data and logic specific to their role in the game.
+
+## The `ActorType` union
+
+The system defines all valid actor type strings in `values.ts` and re-exports the union through `types.ts`:
+
+```typescript
+// src/module/actor/values.ts
+const ACTOR_TYPES = [
+  "army",
+  "character",
+  "familiar",
+  "hazard",
+  "loot",
+  "npc",
+  "party",
+  "vehicle",
+] as const;
+
+// src/module/actor/types.ts
+type ActorType = (typeof ACTOR_TYPES)[number];
+// => "army" | "character" | "familiar" | "hazard" | "loot" | "npc" | "party" | "vehicle"
+```
+
+Use this union whenever you need to constrain or switch over actor types in your own code.
+
+## Checking an actor's type
+
+The simplest way to check a type is a direct string comparison:
+
+```typescript
+if (actor.type === "character") {
+  // actor is ActorPF2e, not yet narrowed
+}
+```
+
+<Tip>
+  Prefer the `actor.isOfType()` typeguard method — it narrows the TypeScript type so subsequent code can access type-specific properties without casting:
+
+  ```typescript
+  if (actor.isOfType("character")) {
+    // actor is now CharacterPF2e
+    console.log(actor.system.details.level.value);
+  }
+
+  // Accepts multiple types
+  if (actor.isOfType("character", "npc")) {
+    // actor is CharacterPF2e | NPCPF2e (both extend CreaturePF2e)
+    console.log(actor.system.attributes.hp.value);
+  }
+  ```
+
+  The method is defined on `ActorPF2e` and backed by the `ActorInstances` interface, which maps each type string to its concrete class.
+</Tip>
+
+## The creature subtype
+
+`CharacterPF2e` and `NPCPF2e` both extend the abstract `CreaturePF2e` class rather than `ActorPF2e` directly. `CreaturePF2e` supplies the shared creature logic: senses, speeds, attribute modifiers, strike actions, spellcasting, and skill statistics. `FamiliarPF2e` also extends `CreaturePF2e`.
+
+```typescript
+const CREATURE_ACTOR_TYPES = ["character", "npc", "familiar"] as const;
+```
+
+You can test for the creature subtype the same way:
+
+```typescript
+if (actor.isOfType("creature")) {
+  // actor is CreaturePF2e — access skills, senses, strikes, etc.
+  const perception = actor.perception;
+}
+```
+
+## Actor classes
+
+<CardGroup cols={2}>
+  <Card title="CharacterPF2e" icon="user">
+    **Type string:** `"character"`
+
+    Player characters. Extends `CreaturePF2e`.
+
+    Key properties and features:
+    - **Ability scores** — STR, DEX, CON, INT, WIS, CHA stored in `system.abilities`
+    - **Skills** — all 16 core skills as `Statistic` instances
+    - **Feats** — a `CharacterFeats` collection with feat slots for ancestry, class, general, and skill feats
+    - **Spellcasting** — multiple `SpellcastingEntryPF2e` items forming the actor's `spellcasting` collection
+    - **Inventory** — `ActorInventory` for all carried physical items
+    - **Hero points** — tracked in `system.resources.heroPoints`
+    - **Crafting** — formula book and crafting checks
+    - **Automatic Bonus Progression** — ABP support that replaces rune economy when enabled
+    - **Elemental Blast** — kineticist blast calculations via `ElementalBlast`
+    - **Level** — `system.details.level.value`
+
+    ```typescript
+    import { CharacterPF2e } from "@actor";
+
+    declare const actor: CharacterPF2e;
+    const level = actor.system.details.level.value;
+    const heroPoints = actor.system.resources.heroPoints.value;
+    const perception = actor.perception?.mod;
+    ```
+  </Card>
+
+  <Card title="NPCPF2e" icon="dragon">
+    **Type string:** `"npc"`
+
+    Monsters and non-player characters. Extends `CreaturePF2e`.
+
+    Key properties and features:
+    - **Flat stat-block layout** — saves, AC, perception, and HP are authored directly rather than built from ability scores
+    - **Level** — `system.details.level.value`; supports Elite (+2) and Weak (−2) adjustments via `isElite` / `isWeak`
+    - **Melee items** — `MeleePF2e` items represent the NPC's strike actions
+    - **Recall Knowledge** — DCs calculated via `creatureIdentificationDCs()`
+    - **Troop support** — `otherSegments` references sibling actors forming a troop
+    - **Simple sheet** — a streamlined `SimpleNPCSheet` is available as an alternative sheet
+
+    ```typescript
+    import { NPCPF2e } from "@actor";
+
+    declare const npc: NPCPF2e;
+    const isElite = npc.isElite;
+    const baseLevel = npc.baseLevel;
+    const description = npc.description; // public notes
+    ```
+  </Card>
+
+  <Card title="FamiliarPF2e" icon="paw">
+    **Type string:** `"familiar"`
+
+    Magical animal companions bonded to a PC master. Extends `CreaturePF2e`.
+
+    Key properties and features:
+    - **Master derivation** — many statistics (perception, saves, AC) are derived from the bonded master's level and spellcasting proficiency
+    - **Master link** — `system.master.id` points to the owning character's actor ID
+    - **Familiar abilities** — feat-like ability items that grant senses, movement types, and special actions
+    - **Size** — always Tiny unless a familiar ability changes it
+
+    ```typescript
+    if (actor.isOfType("familiar")) {
+      const masterId = actor.system.master.id;
+      const master = game.actors.get(masterId ?? "");
+    }
+    ```
+  </Card>
+
+  <Card title="HazardPF2e" icon="triangle-exclamation">
+    **Type string:** `"hazard"`
+
+    Traps and environmental hazards. Extends `ActorPF2e` directly (not a creature).
+
+    Key properties and features:
+    - **Stealth DC** — `system.attributes.stealth.value` for passive detection
+    - **Disable checks** — thievery or other skill DCs to disarm
+    - **Reset** — time and condition to become active again
+    - **Routine** — action sequence the hazard performs each round when active
+    - **Hardness and HP** — for complex hazards with destructible components
+    - **Reaction** — trigger and effect for simple hazards
+
+    ```typescript
+    if (actor.isOfType("hazard")) {
+      const stealthDC = actor.system.attributes.stealth.value;
+      const isComplex = actor.system.details.isComplex;
+    }
+    ```
+  </Card>
+
+  <Card title="VehiclePF2e" icon="ship">
+    **Type string:** `"vehicle"`
+
+    Ships, wagons, siege engines, and other conveyances. Extends `ActorPF2e` directly.
+
+    Key properties and features:
+    - **Piloting** — pilot skill check and DC
+    - **Speed** — movement speed in feet
+    - **Hit points** — HP tracked like a creature; no death or dying conditions
+    - **Crew** — minimum and maximum crew counts
+    - **Collision** — damage dealt on collision
+    - **Size linking** — token size can be linked to the vehicle's size attribute
+
+    ```typescript
+    if (actor.isOfType("vehicle")) {
+      const speed = actor.system.details.speed;
+      const pilotingDC = actor.system.details.pilotingCheck;
+    }
+    ```
+  </Card>
+
+  <Card title="PartyPF2e" icon="users">
+    **Type string:** `"party"`
+
+    A group entity that tracks party-level resources and member actors. Extends `ActorPF2e` directly.
+
+    Key properties and features:
+    - **Member references** — `system.details.members` holds the UUIDs of member actors
+    - **Travel speed** — derived from the slowest member
+    - **Camping** — rest and daily prep mechanics
+    - **Exploration activities** — each member's chosen activity during overland travel
+    - **No synthetics** — `allowSynthetics` returns `false`; parties cannot be unlinked token actors
+
+    ```typescript
+    if (actor.isOfType("party")) {
+      const memberUUIDs = actor.system.details.members.map((m) => m.uuid);
+    }
+    ```
+  </Card>
+
+  <Card title="ArmyPF2e" icon="chess-rook">
+    **Type string:** `"army"`
+
+    Mass combat entities used in the Warfare subsystem. Extends `ActorPF2e` directly.
+
+    Key properties and features:
+    - **Morale** — current and maximum morale points
+    - **Scouting** — scouting modifier for strategic movement
+    - **Routing** — threshold at which the army routs and is removed
+    - **Tactics** — a list of tactical abilities the army has learned
+    - **Gear** — equipment items representing army-level gear
+    - **Level** — army level used to calculate statistics
+  </Card>
+
+  <Card title="LootPF2e" icon="chest">
+    **Type string:** `"loot"`
+
+    Treasure containers for distributing items to players. Extends `ActorPF2e` directly.
+
+    Key properties and features:
+    - **Physical items only** — holds weapons, armor, equipment, treasure, etc.
+    - **Loot sheet** — a dedicated `LootSheetPF2e` for displaying and distributing loot
+    - **Observer permissions** — players with Observer permission can view but not edit
+    - **Pickup** — players can transfer items from a loot actor to their own character
+
+    ```typescript
+    // Check if an actor is a loot container before transferring items
+    if (targetActor.isOfType("loot")) {
+      await item.transfer(targetActor);
+    }
+    ```
+  </Card>
+</CardGroup>
+
+## Base class properties
+
+All actor types inherit the following from `ActorPF2e`:
+
+| Property | Type | Description |
+|---|---|---|
+| `inventory` | `ActorInventory` | Collection of all owned physical items |
+| `conditions` | `ActorConditions` | Active conditions on this actor |
+| `rules` | `RuleElement[]` | Prepared rule elements from all owned items |
+| `synthetics` | `RuleElementSynthetics` | Synthetic data generated by rule elements |
+| `auras` | `Map<string, AuraData>` | Auras this actor is currently emanating |
+| `armorClass` | `StatisticDifficultyClass \| null` | AC statistic difficulty class |
+| `spellcasting` | `ActorSpellcasting \| null` | Spellcasting entry collection |
+| `saves` | `Record<SaveType, Statistic> \| undefined` | Saving throw statistics |
+| `perception` | `PerceptionStatistic \| undefined` | Perception statistic |
+| `skills` | `Record<string, Statistic> \| undefined` | Skill statistics |
+| `initiative` | `ActorInitiative \| null` | Initiative rolling handler |

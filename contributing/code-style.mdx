@@ -1,0 +1,199 @@
+---
+title: "Code Style"
+description: "Formatting, linting, and TypeScript conventions used in the PF2e codebase."
+---
+
+The project enforces consistent code style through ESLint and Prettier, both of which run as part of CI. PRs that fail style checks will not be merged.
+
+## Languages
+
+| Language | Usage |
+|---|---|
+| **TypeScript** (strict) | All source code under `src/` and `build/` |
+| **SCSS** | Stylesheets under `src/styles/` |
+| **Handlebars (`.hbs`)** | HTML templates |
+| **Svelte** | Select UI components |
+| **JSON** | Compendium packs, localization, manifests |
+
+## Formatter: Prettier
+
+[Prettier](https://prettier.io/) is the canonical formatter for the project. The configuration lives in `.prettierrc.json`:
+
+```json
+{
+    "printWidth": 120,
+    "tabWidth": 4,
+    "plugins": ["prettier-plugin-svelte"],
+    "overrides": [
+        {
+            "files": ["*.scss", "*.css"],
+            "options": {
+                "requirePragma": false,
+                "parser": "scss"
+            }
+        },
+        {
+            "files": ["*.svelte"],
+            "options": {
+                "parser": "svelte",
+                "htmlWhitespaceSensitivity": "ignore"
+            }
+        },
+        {
+            "files": ["*.yml"],
+            "options": { "tabWidth": 2 }
+        },
+        {
+            "files": "*.html",
+            "options": {
+                "requirePragma": false,
+                "parser": "html",
+                "htmlWhitespaceSensitivity": "ignore"
+            }
+        }
+    ]
+}
+```
+
+Key settings:
+- **120-character line width** — wider than the Prettier default to accommodate TypeScript generics
+- **4-space indentation** for all files except YAML (2 spaces)
+- `prettier-plugin-svelte` handles `.svelte` file formatting
+
+## Linter: ESLint
+
+ESLint is configured in `eslint.config.js` using the flat config format with `typescript-eslint`. The linter runs over all `.ts` files in the project (excluding `dist/`, `packs/`, `static/lib/`, and `.mjs` files) and over all `.json` files (excluding `package-lock.json`).
+
+### Key rules
+
+| Rule | Setting | Effect |
+|---|---|---|
+| `eqeqeq` | `error` | Requires `===` instead of `==` |
+| `no-var` | `error` | Prohibits `var`; use `const` or `let` |
+| `no-plusplus` | `error` (with `allowForLoopAfterthoughts`) | Bans `++`/`--` except in `for` loop afterthoughts |
+| `@typescript-eslint/no-explicit-any` | `error` | Bans `any`; use proper types or generics |
+| `@typescript-eslint/explicit-module-boundary-types` | `error` | All exported functions must have explicit return types |
+| `@typescript-eslint/await-thenable` | `error` | Prevents `await` on non-Promise values |
+| `@typescript-eslint/ban-ts-comment` | `error` | Bans `@ts-ignore`, `@ts-nocheck`, etc. |
+| `@typescript-eslint/no-unused-vars` | `error` | Unused variables are an error; prefix with `_` to suppress |
+| `@typescript-eslint/array-type` | `error` (default `array`) | Requires `T[]` syntax, not `Array<T>` |
+| `prettier/prettier` | `error` | Formatting violations reported as lint errors |
+
+<Note>
+  Unused function parameters that are intentionally ignored must be prefixed with `_` (e.g. `_event`). Unused type parameters must be prefixed with `_` followed by an uppercase letter (e.g. `_TData`).
+</Note>
+
+## Running Lint and Format
+
+<CodeGroup>
+
+```bash Check
+# Check TypeScript files (ESLint) + SCSS and Svelte files (Prettier)
+npm run lint
+
+# Which expands to:
+# eslint && prettier --check src/styles src/**/*.svelte
+```
+
+```bash Fix
+# Auto-fix ESLint issues and reformat SCSS and Svelte files
+npm run lint:fix
+
+# Which expands to:
+# eslint --fix && prettier --write src/styles src/**/*.svelte
+```
+
+</CodeGroup>
+
+The `pretest` hook runs `lint` automatically before Jest, so `npm run test` always validates style first.
+
+## TypeScript Conventions
+
+### Strict mode
+
+The project compiles with `"strict": true` in `tsconfig.json`, plus several additional strictness flags:
+
+```json
+{
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+}
+```
+
+Every class method that overrides a parent method must be annotated with the `override` keyword.
+
+### Path aliases
+
+Use path aliases instead of deep relative imports. The full list is defined in `tsconfig.json`:
+
+```typescript
+// Preferred
+import type { CharacterPF2e } from "@actor";
+import { sluggify } from "@util";
+import { RuleElementPF2e } from "@module/rules";
+
+// Avoid
+import type { CharacterPF2e } from "../../../module/actor/index.ts";
+```
+
+### `import type`
+
+Use `import type` whenever you only need a type at compile time. This improves build performance and ensures the import is erased at runtime:
+
+```typescript
+import type { ActorPF2e } from "@actor";
+import type { ItemSourcePF2e } from "@item/base/data/index.ts";
+```
+
+Use a regular `import` only when you need the runtime value (class constructor, function, constant).
+
+### Functional utilities with `remeda`
+
+The [`remeda`](https://remedajs.com/) library (`remeda@^2.32.0`) is the preferred utility library for functional-style operations on arrays and objects. Use it instead of hand-rolling `reduce`, `filter`, or `map` chains where `remeda` provides a clearer alternative:
+
+```typescript
+import * as R from "remeda";
+
+const grouped = R.groupBy(items, (item) => item.type);
+const unique = R.unique(slugs);
+```
+
+### Foundry schema fields
+
+Data model schemas are defined using `foundry.data.fields`. Follow the patterns established in the existing actor and item data models under `src/module/actor/` and `src/module/item/`:
+
+```typescript
+import fields = foundry.data.fields;
+
+class MySchema extends foundry.abstract.DataModel {
+    static override defineSchema() {
+        return {
+            value: new fields.NumberField({ required: true, nullable: false, initial: 0 }),
+            label: new fields.StringField({ required: true }),
+        };
+    }
+}
+```
+
+## Testing
+
+Tests use [Jest](https://jestjs.io/) with the `jsdom` environment (configured in `jest.config.json`). Test files live under `tests/`.
+
+Run the full test suite:
+
+```bash
+npm run test
+```
+
+This runs `pretest` (lint) first, then Jest. To run Jest directly without linting:
+
+```bash
+npx jest
+```
+
+<Tip>
+  When writing tests for rule elements or data models, import the relevant class directly and construct minimal source data to exercise the specific behaviour you're testing. Avoid importing the entire system entry point, as it has Foundry globals as side-effect dependencies.
+</Tip>

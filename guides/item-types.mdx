@@ -1,0 +1,357 @@
+---
+title: "Item Types"
+description: "A reference for every item type in the PF2e system, from weapons and spells to conditions and campaign features."
+---
+
+Every piece of data embedded on an actor — a sword, a spell, an ancestry, a condition — is an instance of a subclass of `ItemPF2e`. The base class (`ItemPF2e` in `src/module/item/base/document.ts`) provides the shared foundation: rule elements, slug derivation, chat messages, compendium migration, and item granting. Concrete item types extend this with the data and behavior specific to their category.
+
+## The `ItemType` union
+
+All valid item type strings are defined in `src/module/item/values.ts`:
+
+```typescript
+const ITEM_TYPES = [
+  "action",
+  "affliction",
+  "ammo",
+  "ancestry",
+  "armor",
+  "background",
+  "backpack",
+  "book",
+  "campaignFeature",
+  "class",
+  "condition",
+  "consumable",
+  "deity",
+  "effect",
+  "equipment",
+  "feat",
+  "heritage",
+  "kit",
+  "lore",
+  "melee",
+  "shield",
+  "spell",
+  "spellcastingEntry",
+  "treasure",
+  "weapon",
+] as const;
+
+type ItemType = (typeof ITEM_TYPES)[number];
+```
+
+Note that the `ItemInstances` interface maps some type strings to different class names than you might expect: `"action"` maps to `AbilityItemPF2e`, and `"backpack"` maps to `ContainerPF2e`.
+
+## Checking an item's type
+
+```typescript
+// Direct string comparison — does not narrow the TypeScript type
+if (item.type === "weapon") { ... }
+
+// isOfType() typeguard — narrows to the concrete class
+if (item.isOfType("weapon")) {
+  // item is WeaponPF2e
+  const damage = item.system.damage;
+  const group = item.system.group;
+}
+
+// Multiple types at once
+if (item.isOfType("condition", "effect", "affliction")) {
+  // item is ConditionPF2e | EffectPF2e | AfflictionPF2e
+  // All three extend AbstractEffectPF2e
+}
+```
+
+The top-level helper `itemIsOfType()` (imported from `@item/helpers`) works the same way but accepts any `ItemPF2e` without requiring a method call on the instance.
+
+## Item class hierarchy
+
+Several abstract intermediate classes group related item types:
+
+| Abstract class | Concrete subtypes |
+|---|---|
+| `PhysicalItemPF2e` | `weapon`, `armor`, `shield`, `equipment`, `consumable`, `ammo`, `treasure`, `backpack`, `book` |
+| `ABCItemPF2e` | `ancestry`, `background`, `class` |
+| `AbstractEffectPF2e` | `condition`, `effect`, `affliction` |
+
+## Item types by category
+
+### Character building
+
+<AccordionGroup>
+  <Accordion title="ancestry — AncestryPF2e">
+    Represents a character's racial origin (Human, Elf, Dwarf, etc.). Extends `ABCItemPF2e`.
+
+    - Grants HP, size, speed, ability boosts/flaws, and ancestry feat slots
+    - Embeds `HeritagePF2e` items for the character's specific heritage choice
+    - Contains `system.items` — a map of features granted at level 1
+    - Ancestry feats are separate `FeatPF2e` items with the `ancestry` trait
+  </Accordion>
+
+  <Accordion title="heritage — HeritagePF2e">
+    A character's specific lineage within an ancestry (e.g., Skilled Human, Seer Elf). Extends `ItemPF2e` directly.
+
+    - Provides additional abilities that refine the base ancestry
+    - Linked to an ancestry via `system.ancestry.slug`
+    - Versatile heritages (e.g., Dhampir) can attach to any ancestry
+  </Accordion>
+
+  <Accordion title="background — BackgroundPF2e">
+    A character's backstory and formative training. Extends `ABCItemPF2e`.
+
+    - Grants two ability boosts, a trained skill, and a skill feat
+    - `system.items` holds the granted skill feat and any additional features
+    - Lore skills added by a background are separate `LorePF2e` items
+  </Accordion>
+
+  <Accordion title="class — ClassPF2e">
+    A character's adventuring class (Fighter, Wizard, Rogue, etc.). Extends `ABCItemPF2e`.
+
+    - Drives the entire level advancement table via `system.items`
+    - Grants class HP, key ability score, trained proficiencies, and class features
+    - `system.classDC` defines the class DC statistic
+    - Contains subclass ("Racket", "Muse", "Research Field") data
+  </Accordion>
+
+  <Accordion title="feat — FeatPF2e">
+    A character ability selected from a feat list. Extends `ItemPF2e` directly.
+
+    - `system.category` — `"ancestry"`, `"class"`, `"general"`, `"skill"`, `"bonus"`, etc.
+    - `system.prerequisites` — prerequisite strings displayed in the feat description
+    - `system.frequency` — how often a feat's effect can be used (at-will, per day, per encounter)
+    - Can have sub-features via the `GrantItem` rule element
+  </Accordion>
+
+  <Accordion title="action — AbilityItemPF2e">
+    Class features, racial abilities, and other non-feat character abilities. Extends `ItemPF2e` directly.
+
+    - Note: the type string is `"action"` but the class is `AbilityItemPF2e`
+    - `system.actionType` — `"action"`, `"reaction"`, `"free"`, or `"passive"`
+    - `system.actions` — action cost (1, 2, or 3 actions)
+    - `system.category` — `"interaction"`, `"defensive"`, `"offensive"`, or `null`
+    - Used for champion's reactions, dragon claws, skill actions, and similar
+  </Accordion>
+
+  <Accordion title="lore — LorePF2e">
+    A trained lore subcategory skill (e.g., "Farming Lore", "Mercantile Lore"). Extends `ItemPF2e` directly.
+
+    - Registers as a skill statistic on the owning `CharacterPF2e`
+    - `system.proficient` — proficiency rank object
+    - Sheet handled by the base `ItemSheetPF2e` (registered via the `lore` type in `registerSheets`)
+  </Accordion>
+</AccordionGroup>
+
+### Spellcasting
+
+<AccordionGroup>
+  <Accordion title="spell — SpellPF2e">
+    An individual spell entry. Extends `ItemPF2e` directly.
+
+    - `system.level` — base spell rank (1–10)
+    - `system.traits` — includes the magical tradition (`arcane`, `divine`, `occult`, `primal`)
+    - `system.damage` — damage formulas keyed by damage part ID
+    - `system.defense` — save type or attack roll flag
+    - `system.area` — shape and size of the spell's area of effect (burst, cone, line, etc.)
+    - `system.duration` — duration string and sustained flag
+    - `system.range` — increment and maximum range
+    - Supports overlays for heightening: `system.heightening` with `fixed` or `interval` mode
+    - Can be cast as a ritual via `system.category.value === "ritual"`
+
+    ```typescript
+    if (item.isOfType("spell")) {
+      const rank = item.rank; // heightened rank
+      const baseRank = item.baseRank;
+      const traditions = item.system.traits.traditions;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="spellcastingEntry — SpellcastingEntryPF2e">
+    A spell list and tradition for a character or NPC. Extends `ItemPF2e` directly.
+
+    - Note: the type string is `"spellcastingEntry"` (camelCase) but registered as `"spellcastingEntry"` in the sheet map
+    - `system.tradition` — `"arcane"`, `"divine"`, `"occult"`, or `"primal"`
+    - `system.prepared` — preparation type: `"prepared"`, `"spontaneous"`, `"innate"`, or `"focus"`
+    - `system.slots` — spell slot counts per rank for prepared/spontaneous casters
+    - `system.proficiency` — spellcasting attack and DC proficiency rank
+    - Owns a `SpellCollection` that provides typed access to all spells in the entry
+  </Accordion>
+</AccordionGroup>
+
+### Equipment & gear
+
+All physical item types extend `PhysicalItemPF2e`, which adds identification state, bulk, price, quantity, rarity, and rune slots.
+
+<AccordionGroup>
+  <Accordion title="weapon — WeaponPF2e">
+    Melee and ranged weapons. Extends `PhysicalItemPF2e`.
+
+    - `system.damage` — die faces, number of dice, and damage type
+    - `system.group` — weapon group (sword, bow, axe, etc.) used for critical specialization
+    - `system.category` — `"simple"`, `"martial"`, `"advanced"`, `"unarmed"`, or `"ammunition"`
+    - `system.range` — `null` for melee, or `{ increment, max }` for ranged
+    - `system.reload` — reload action cost string (`"-"`, `"0"`, `"1"`, `"2"`, etc.)
+    - `system.runes` — potency, striking, and property rune slots
+    - Trait toggles: `versatile`, `twin`, `parry`, `thrown`, `modular`, `combination`
+    - May reference a `ShieldPF2e` via `shield` if it is a shield boss or spike
+
+    ```typescript
+    if (item.isOfType("weapon")) {
+      const damageDie = item.system.damage.die; // "d6", "d8", etc.
+      const damageType = item.system.damage.damageType; // "slashing", "piercing", etc.
+      const isMelee = item.isMelee;
+      const isRanged = item.isRanged;
+      const traits = item.system.traits.value; // string[]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="armor — ArmorPF2e">
+    Body armor of all types. Extends `PhysicalItemPF2e`.
+
+    - `system.category` — `"light"`, `"medium"`, `"heavy"`, or `"unarmored"`
+    - `system.acBonus` — item bonus to AC
+    - `system.dexCap` — maximum Dexterity modifier to AC
+    - `system.checkPenalty` — penalty to Strength/Dexterity-based checks
+    - `system.speedPenalty` — penalty to Speed
+    - `system.strength` — Strength requirement
+    - `system.runes` — resilience and property rune slots
+  </Accordion>
+
+  <Accordion title="shield — ShieldPF2e">
+    Shields as separate document items (as opposed to the integrated shield stat on armor). Extends `PhysicalItemPF2e`.
+
+    - `system.hardness` — damage reduction when blocking
+    - `system.hp` — shield HP pool
+    - `system.speedPenalty` — Speed penalty while wielding
+    - Tower shields, bucklers, and spiked shields are all of type `"shield"`
+  </Accordion>
+
+  <Accordion title="equipment — EquipmentPF2e">
+    General gear and tools that do not fit another physical category. Extends `PhysicalItemPF2e`.
+
+    - Adventuring gear, alchemical tools, worn items, and held items
+    - `system.usage` — how the item is carried or worn
+    - Rule elements on equipment can provide persistent bonuses (e.g., a Belt of Giant Strength)
+  </Accordion>
+
+  <Accordion title="consumable — ConsumablePF2e">
+    Single-use or limited-use items. Extends `PhysicalItemPF2e`.
+
+    - `system.consumableType` — `"potion"`, `"scroll"`, `"wand"`, `"talisman"`, `"ammunition"`, `"drug"`, `"mutagen"`, `"oil"`, `"snare"`, `"toolkit"`, `"other"`
+    - `system.charges` — current and maximum charges
+    - `system.spell` — embedded spell data for scrolls and wands
+    - Provides `createConsumableFromSpell()` helper for generating scrolls and wands programmatically
+  </Accordion>
+
+  <Accordion title="ammo — AmmoPF2e">
+    Arrows, bolts, bullets, and other ammunition. Extends `PhysicalItemPF2e`.
+
+    - `system.usage` — always `"held-in-one-hand"` for tracking purposes
+    - Consumed on use; `quantity` tracks remaining rounds
+    - Can carry property runes via `system.runes.property`
+  </Accordion>
+
+  <Accordion title="treasure — TreasurePF2e">
+    Coins and other valuables. Extends `PhysicalItemPF2e`.
+
+    - `system.denomination` — `"cp"`, `"sp"`, `"gp"`, or `"pp"`
+    - `system.value` — numeric value in the listed denomination
+    - Treated as currency by the wealth tracking system
+  </Accordion>
+
+  <Accordion title="kit — KitPF2e">
+    A bundle of multiple items (e.g., an adventurer's pack). Extends `ItemPF2e` directly.
+
+    - `system.items` — map of entries, each with `uuid`, `quantity`, and optional `isContainer` flag
+    - Not a physical item itself; unboxing creates the constituent items on the actor
+  </Accordion>
+
+  <Accordion title="backpack — ContainerPF2e">
+    Bags, quivers, and other containers that can hold items. Extends `PhysicalItemPF2e`.
+
+    - Note: the type string is `"backpack"` but the class is `ContainerPF2e`
+    - `system.bulk` — capacity and ignored bulk rules
+    - `system.collapsed` — whether the container is open or closed in the inventory UI
+    - Items nested inside inherit the container's carried state
+  </Accordion>
+
+  <Accordion title="book — BookPF2e">
+    Spellbooks and other readable books. Extends `PhysicalItemPF2e`.
+
+    - `system.capacity` — number of spell levels the book can hold
+    - `system.spells` — embedded spell data for spells written into the book
+    - Used by wizard prepared casters whose spell list is sourced from a spellbook
+  </Accordion>
+</AccordionGroup>
+
+### Effects & conditions
+
+<AccordionGroup>
+  <Accordion title="condition — ConditionPF2e">
+    Persistent game conditions such as Frightened, Grabbed, Stunned, and Persistent Damage. Extends `AbstractEffectPF2e`.
+
+    - `system.slug` — the condition key (e.g., `"frightened"`, `"grabbed"`, `"persistent-damage"`)
+    - `system.value` — numeric severity for valued conditions (Frightened 2, Stunned 3)
+    - `system.persistent` — persistent damage data (formula, damage type, DC to end)
+    - Managed via `actor.conditions` rather than direct item manipulation
+
+    ```typescript
+    // Add a condition to an actor
+    await actor.increaseCondition("frightened", { max: 4 });
+    await actor.removeCondition("frightened");
+    const isFrightened = actor.hasCondition("frightened");
+    ```
+  </Accordion>
+
+  <Accordion title="effect — EffectPF2e">
+    Timed effects on actors from spells, abilities, or other sources. Extends `AbstractEffectPF2e`.
+
+    - `system.duration` — value, unit (`"rounds"`, `"minutes"`, `"hours"`, `"days"`), and expiry condition
+    - `system.badge` — optional counter or value displayed on the effect icon
+    - Rule elements on effects commonly implement temporary bonuses and penalties
+    - Effects can be linked to their originating item via `system.context`
+  </Accordion>
+
+  <Accordion title="affliction — AfflictionPF2e">
+    Diseases and poisons with staged progressions. Extends `AbstractEffectPF2e`.
+
+    - `system.stage` — current stage number
+    - `system.stages` — array of stage definitions, each with effects and duration
+    - `system.save` — save type and DC to resist or recover
+    - Automatically advances stages on failed saves and removes itself on recovery
+  </Accordion>
+</AccordionGroup>
+
+### Narrative & other
+
+<AccordionGroup>
+  <Accordion title="deity — DeityPF2e">
+    Deity entries with sanctification, domains, divine spells, and edicts/anathema. Extends `ItemPF2e` directly.
+
+    - `system.sanctification` — whether the deity grants holy, unholy, or either sanctification
+    - `system.domains` — primary and alternate domains
+    - `system.spells` — divine spell entries by rank
+    - `system.edicts` and `system.anathema` — arrays of strings
+    - `system.weapon` — the deity's favored weapon UUID
+  </Accordion>
+
+  <Accordion title="melee — MeleePF2e">
+    NPC strike items that represent a single melee or ranged attack action. Extends `ItemPF2e` directly.
+
+    - Only valid on `NPCPF2e` actors
+    - `system.damageRolls` — keyed damage formulas (damage type + formula)
+    - `system.attackEffects` — additional effects applied on hit
+    - `system.bonus` — flat attack bonus
+    - Distinct from `WeaponPF2e`: NPC strikes are authored directly rather than computed from weapon data
+  </Accordion>
+
+  <Accordion title="campaignFeature — CampaignFeaturePF2e">
+    Adventure Path-specific features such as Kingmaker Kingdom abilities. Extends `ItemPF2e` directly.
+
+    - `system.category` — campaign-specific category string
+    - `system.level` — feature level
+    - Used when a campaign needs a feat-like item type with its own sheet, compendium tab, and browser filter
+  </Accordion>
+</AccordionGroup>

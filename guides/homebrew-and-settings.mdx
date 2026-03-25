@@ -1,0 +1,305 @@
+---
+title: "Homebrew and Settings"
+description: "System settings for automation, metagame, and variant rules, plus the homebrew extension system for custom traits, damage types, and languages."
+---
+
+The PF2e system exposes four major settings menus — Automation, Metagame, Variant Rules, and Homebrew — all registered in `src/module/system/settings/`. The `game.pf2e.settings` object gives you read-only programmatic access to the current resolved values.
+
+---
+
+## Automation Settings
+
+Automation settings control how much mechanical bookkeeping the system handles automatically. They are world-scoped (GM-only) and live under `game.pf2e.settings.automation`.
+
+<CardGroup cols={2}>
+  <Card title="Rules-Based Vision" icon="eye">
+    `rulesBasedVision` — Automatically sets token vision range and type based on the actor's senses (darkvision, low-light vision, etc.). Default: **on**.
+  </Card>
+  <Card title="IWR Automation" icon="shield">
+    `iwr` — Applies immunities, weaknesses, and resistances automatically when damage is applied to a token. Default: **on**.
+  </Card>
+  <Card title="Remove Expired Effects" icon="trash">
+    `removeExpiredEffects` — Deletes effects and conditions when their duration expires at turn start. Default: **on**.
+  </Card>
+  <Card title="Flanking Detection" icon="arrows-to-dot">
+    `flankingDetection` — Calculates flanking automatically based on token positions and arc. Default: **on**.
+  </Card>
+  <Card title="Encumbrance" icon="weight-hanging">
+    `encumbrance` — Tracks Bulk and applies the Encumbered condition automatically. Default: **off**.
+  </Card>
+  <Card title="Lootable NPCs" icon="box-open">
+    `lootableNPCs` — Makes defeated NPC tokens lootable by players without needing the GM to convert them. Default: **on**.
+  </Card>
+</CardGroup>
+
+```typescript
+// Read current automation settings
+console.log(game.pf2e.settings.iwr);           // boolean
+console.log(game.pf2e.settings.encumbrance);   // boolean
+console.log(game.pf2e.settings.rbv);           // boolean (rules-based vision)
+```
+
+### Reach Enforcement
+
+`reachEnforcement` is a `Set<string>` specifying which object types enforce their reach for interaction (default: `{"doors"}`):
+
+```typescript
+console.log(game.pf2e.settings.automation.reachEnforcement);
+// Set { "doors" }
+// Possible values: "corpses", "doors", "loot", "merchants"
+```
+
+---
+
+## Metagame Settings
+
+Metagame settings control what information is visible to players in the chat log and on the canvas. They are world-scoped (GM-only) and live under `game.pf2e.settings.metagame`.
+
+| Setting | `game.pf2e.settings` path | Default | Description |
+|---|---|---|---|
+| Show DCs | `metagame.dcs` | `false` | Show DC values in all check chat cards. |
+| Show Results | `metagame.results` | `true` | Show degree-of-success text ("Success", "Critical Failure", etc.) to players. |
+| Show Breakdowns | `metagame.breakdowns` | `false` | Show the modifier breakdown tooltip to everyone, not just the GM. |
+| Party Vision | `metagame.partyVision` | `false` | Share explored areas and vision between all party members. |
+| Show Party Stats | `metagame.partyStats` | `true` | Show party statistics panel. |
+| Secret Checks | `metagame.secretChecks` | `false` | Roll checks with the Secret trait as GM rolls instead of blind rolls. |
+| Token Name Visibility | `tokens.nameVisibility` | `false` | Use the token's nameplate visibility setting to control whose names appear in chat. |
+
+<Note>
+  **Secret Damage** (`metagame_secretDamage`) and **Secret Condition** (`metagame_secretCondition`) are registered world settings but are not surfaced on the `game.pf2e.settings` object. Access them with `game.settings.get("pf2e", "metagame_secretDamage")` if needed.
+</Note>
+
+```typescript
+// Check individual metagame settings
+if (game.pf2e.settings.metagame.dcs) {
+  // DCs are shown in chat
+}
+if (game.pf2e.settings.metagame.results) {
+  // Degree-of-success labels are visible to players
+}
+// Token name visibility is on the tokens object, not metagame
+if (game.pf2e.settings.tokens.nameVisibility) {
+  // Token names in chat follow token visibility
+}
+```
+
+---
+
+## Variant Rules Settings
+
+Variant rules are optional gameplay changes drawn from the Pathfinder 2e Game Mastery Guide. They are world-scoped (GM-only) and trigger a full actor re-derivation when toggled. Access them under `game.pf2e.settings.variants`.
+
+<AccordionGroup>
+  <Accordion title="Stamina Variant">
+    **Key:** `staminaVariant` → `game.pf2e.settings.variants.stamina`
+
+    Adds a Stamina pool to player characters. Stamina is spent instead of HP for most damage until depleted. Characters also gain Resolve Points for heroic actions.
+  </Accordion>
+  <Accordion title="Free Archetype">
+    **Key:** `freeArchetypeVariant` → `game.pf2e.settings.variants.fa`
+
+    Characters gain a free archetype dedication feat at 2nd level and an archetype feat every even level thereafter, in addition to their normal class feats.
+  </Accordion>
+  <Accordion title="Gradual Ability Boosts">
+    **Key:** `gradualBoostsVariant` → `game.pf2e.settings.variants.gab`
+
+    Instead of receiving four ability boosts at levels 5, 10, 15, and 20, characters gain one boost at each level in those tier (5–9, 10–14, 15–19, 20).
+  </Accordion>
+  <Accordion title="Automatic Bonus Progression (ABP)">
+    **Key:** `automaticBonusVariant` → `game.pf2e.settings.variants.abp`
+
+    Replaces magic weapon and armor runes with automatic level-based potency, striking, and resilient bonuses. Options:
+    - `"noABP"` — Standard magic items (default).
+    - `"ABPFundamentalPotency"` — Fundamental runes (potency/striking/resilient) become automatic; property runes still require items.
+    - `"ABPRulesAsWritten"` — Full ABP as published.
+  </Accordion>
+  <Accordion title="Proficiency Without Level">
+    **Key:** `proficiencyVariant` → `game.pf2e.settings.variants.pwol.enabled`
+
+    Removes character level from proficiency-based calculations. When enabled, you can customize the flat bonus for each proficiency rank:
+
+    ```typescript
+    game.pf2e.settings.variants.pwol.modifiers;
+    // [untrained, trained, expert, master, legendary]
+    // defaults: [-2, 2, 4, 6, 8]
+    ```
+  </Accordion>
+  <Accordion title="Mythic">
+    **Key:** `mythic` → `game.pf2e.settings.campaign.mythic`
+
+    Enables Mythic rules for high-power campaigns. Options: `"disabled"`, `"enabled"`, `"variant-tiers"`.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Homebrew
+
+The Homebrew settings panel lets GMs add custom content that extends the system's trait lists, damage types, and language lists. All homebrew data is stored in the world's settings and is **world-specific**.
+
+<Warning>
+  Homebrew content is not portable between worlds. If you delete a homebrew trait or damage type that is already referenced by actors or items, the system runs a migration to clean up the orphaned references. Back up your world before making large homebrew changes.
+</Warning>
+
+### Homebrew Element Keys
+
+The following categories can be extended with custom entries:
+
+```typescript
+const HOMEBREW_ELEMENT_KEYS = [
+  "languages",         // new spoken/written languages
+  "armorGroups",       // new armor groups (chain, plate, etc.)
+  "baseArmors",        // new base armor types
+  "classTraits",       // class-specific traits (propagate to featTraits, spellTraits)
+  "weaponCategories",  // new weapon categories (simple, martial, etc.)
+  "weaponGroups",      // new weapon groups (sword, bow, etc.)
+  "baseWeapons",       // new base weapon types
+  "creatureTraits",    // creature/ancestry traits (propagate to ancestryTraits, hazardTraits)
+  "featTraits",        // feat traits (propagate to actionTraits)
+  "spellTraits",       // spell traits
+  "weaponTraits",      // weapon traits (propagate to npcAttackTraits)
+  "shieldTraits",      // shield traits
+  "equipmentTraits",   // equipment traits (propagate to armorTraits, consumableTraits)
+] as const;
+```
+
+### Trait Propagation
+
+Adding a trait to a parent key automatically adds it to all related keys. For example, adding a `weaponTrait` also adds it to `npcAttackTraits` so NPCs with that weapon trait display it correctly.
+
+```typescript
+const TRAIT_PROPAGATIONS = {
+  actionTraits:    ["effectTraits"],
+  classTraits:     ["featTraits", "spellTraits"],
+  creatureTraits:  ["ancestryTraits", "hazardTraits"],
+  equipmentTraits: ["armorTraits", "consumableTraits"],
+  featTraits:      ["actionTraits"],
+  weaponTraits:    ["npcAttackTraits"],
+} as const;
+```
+
+### Adding Custom Traits via Settings
+
+In the Foundry settings menu, navigate to **System Settings → Homebrew** and open the **Traits** tab. Each input is a tag field where you type a trait label and press Enter.
+
+Trait entries are stored with a `value` (the display label) and an auto-generated `id` (a sluggified version of the label):
+
+```json
+{
+  "id": "my-custom-trait",
+  "value": "My Custom Trait"
+}
+```
+
+### Adding Custom Damage Types
+
+Custom damage types are managed on the **Damage** tab. Each entry requires:
+
+```typescript
+interface CustomDamageData {
+  label:     string;                        // Display name (e.g., "Radiant")
+  category?: "physical" | "energy" | null;  // IWR category, or null for uncategorized
+  icon:      string | null;                 // Font Awesome icon slug (e.g., "fa-sun")
+}
+```
+
+Custom damage types participate in the full IWR system — you can add immunities, weaknesses, and resistances to them via the actor sheet or rule elements.
+
+### Adding Homebrew via Module Flags
+
+Modules can inject homebrew content without requiring GMs to enter it manually, by setting data in module flags under the key `pf2e-homebrew`:
+
+```typescript
+// In your module's ready hook:
+const moduleData: ModuleHomebrewData = {
+  // Custom skills
+  skills: {
+    "occult-lore": {
+      label:     "Occult Lore",
+      attribute: "int",
+    },
+  },
+  // Custom damage types
+  damageTypes: {
+    radiant: {
+      label:    "Radiant",
+      category: "energy",
+      icon:     "fa-sun",
+    },
+  },
+  // Custom traits (by HOMEBREW_ELEMENT_KEYS category)
+  traits: {
+    creatureTraits: [
+      { id: "celestial-touched", value: "Celestial-Touched" },
+    ],
+    // ... other trait categories
+  },
+  // Tooltip descriptions for your custom traits
+  traitDescriptions: {
+    "celestial-touched": "This creature has been touched by celestial power.",
+  },
+};
+```
+
+<Note>
+  Module-provided homebrew is loaded during the `onInit` call of `HomebrewElements`. It is merged with any world-level homebrew settings and is not editable through the settings UI.
+</Note>
+
+### Language Rarities
+
+The **Languages** tab lets you reassign built-in languages between the common, uncommon, rare, secret, and unavailable buckets, and add entirely new languages. Language rarities affect which languages appear in ancestry feat choices and language selectors.
+
+```typescript
+// Programmatic access
+const langs = game.pf2e.settings.campaign.languages;
+console.log(langs.uncommon);   // Set of uncommon language slugs
+console.log(langs.rare);       // Set of rare language slugs
+console.log(langs.homebrew);   // Set of homebrew language slugs
+```
+
+---
+
+## Campaign Settings
+
+Additional campaign-level toggles live alongside the variant rules:
+
+| Setting | Key | Description |
+|---|---|---|
+| Campaign Feats | `game.pf2e.settings.campaign.feats.enabled` | Enable the Campaign Feats panel on character sheets for non-standard feat progressions. |
+| Campaign Type | `game.pf2e.settings.campaign.type` | Set to `"kingmaker"` to enable the Kingmaker campaign integration; `null` for no campaign module. |
+
+---
+
+## The `game.pf2e.settings` Object
+
+The full settings object provides a read-only snapshot of the currently active configuration:
+
+```typescript
+// Automation
+game.pf2e.settings.iwr                // boolean
+game.pf2e.settings.encumbrance        // boolean
+game.pf2e.settings.rbv                // boolean (rules-based vision)
+
+// Metagame
+game.pf2e.settings.metagame.dcs       // boolean
+game.pf2e.settings.metagame.results   // boolean
+game.pf2e.settings.metagame.breakdowns // boolean
+game.pf2e.settings.metagame.partyVision // boolean
+game.pf2e.settings.metagame.secretChecks // boolean
+
+// Variant rules
+game.pf2e.settings.variants.stamina   // boolean
+game.pf2e.settings.variants.fa        // boolean (free archetype)
+game.pf2e.settings.variants.gab       // boolean (gradual ability boosts)
+game.pf2e.settings.variants.abp       // "noABP" | "ABPFundamentalPotency" | "ABPRulesAsWritten"
+game.pf2e.settings.variants.pwol      // { enabled: boolean; modifiers: number[] }
+
+// Campaign
+game.pf2e.settings.campaign.mythic    // "disabled" | "enabled" | "variant-tiers"
+game.pf2e.settings.campaign.feats     // { enabled: boolean; sections: ... }
+game.pf2e.settings.campaign.languages // LanguageSettings
+```
+
+<Warning>
+  Do not write to `game.pf2e.settings` properties directly. Always use `game.settings.set("pf2e", key, value)` to persist changes, or change settings through the Foundry settings UI so that the system's `onChange` handlers run correctly.
+</Warning>

@@ -1,28 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "PF2e for Foundry VTT",
+  "projectType": "framework",
+  "projectName": "PF2e for Foundry VTT",
+  "projectDescription": "A community-maintained Pathfinder Second Edition game system for Foundry VTT, providing a comprehensive rules engine, actor/item data models, rule elements, and compendium content.",
   "theme": "maple",
-  "colors": {
-    "primary": "#e65b22",
-    "light": "#1c0f0c",
-    "dark": "#dedede"
-  },
-  "favicon": "/favicon.svg",
-  "logo": {
-    "light": "https://media.brand.dev/1303ba63-1ce6-47d4-9090-9f0e4328dfdf.png",
-    "dark": "https://media.brand.dev/1303ba63-1ce6-47d4-9090-9f0e4328dfdf.png"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/foundryvtt/pf2e"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/foundryvtt/pf2e"
-    }
-  },
+  "primaryColor": "#e65b22",
+  "lightColor": "#1c0f0c",
+  "darkColor": "#dedede",
   "navigation": {
     "tabs": [
       {
@@ -93,5 +76,28 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Full Pathfinder Second Edition rules implementation",
+    "Extensive actor types: character, NPC, familiar, hazard, vehicle, party, army",
+    "Rich item types: spells, feats, ancestry, class, equipment, conditions, and more",
+    "Rule Elements system for granular mechanical modifications",
+    "Large compendium library with bestiary, spells, feats, and equipment",
+    "Automated checks, damage rolls, and degree-of-success calculations",
+    "Homebrew support for custom traits, languages, and damage types",
+    "Migration system for data model version upgrades",
+    "Foundry VTT hooks integration for extensibility"
+  ],
+  "publicApiSurface": [
+    "RuleElement (base class for all rule modifications)",
+    "ActorPF2e (base actor document)",
+    "ItemPF2e (base item document)",
+    "CharacterPF2e / NPCPF2e / FamiliarPF2e / HazardPF2e / VehiclePF2e / PartyPF2e / ArmyPF2e",
+    "CheckPF2e (check rolls and dialogs)",
+    "DamagePF2e (damage roll system)",
+    "StatisticPF2e (statistics and modifiers)",
+    "ConditionManager (condition tracking)",
+    "MigrationRunner (data migration system)",
+    "CompendiumBrowser (in-app content browser)"
+  ]
 }

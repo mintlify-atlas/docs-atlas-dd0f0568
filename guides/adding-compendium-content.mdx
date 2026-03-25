@@ -1,0 +1,222 @@
+---
+title: 'Adding compendium content'
+description: 'How to contribute new or updated game content to the PF2e compendium packs.'
+keywords: ['compendium', 'contributing', 'packs', 'json', 'extractPacks', 'ORC', 'OGL']
+---
+
+This page is for contributors who want to add or update game content — feats, spells, conditions, equipment, bestiary actors, and so on. The recommended workflow goes through Foundry's UI rather than editing JSON files directly, so the output always matches what Foundry actually produces.
+
+<Info>
+Before you start, make sure you have a local development environment set up. See [Setup](/contributing/setup) for the full instructions.
+</Info>
+
+## Recommended workflow
+
+<Steps>
+
+<Step title="Run the system in Foundry with a test world">
+Build the system and start Foundry pointing at a test world:
+
+```bash
+pnpm run build --system=pf2e
+```
+
+Then launch Foundry, select your test world, and log in as a GM.
+</Step>
+
+<Step title="Find or create the item">
+You have two options depending on whether you are adding a new entry or updating an existing one.
+
+**New entry:** Create the item directly in your world (for example, use the Items Directory sidebar to create a new feat, or the Actors Directory for a new creature). Fill in all fields using the system's sheets.
+
+**Existing entry:** Open the relevant compendium pack (for example, **Feats**) from the Compendium tab in the sidebar. Click the lock icon to unlock the pack for editing, then open the entry you want to update.
+
+<Tip>
+Editing inside a compendium pack rather than importing to the world avoids accidentally leaving world-local copies behind.
+</Tip>
+</Step>
+
+<Step title="Edit the entry using the system's sheets">
+Use the full system UI — feat sheets, ancestry sheets, creature sheets — to make your changes. The sheets enforce data shape and validate rule element syntax. When you save, Foundry writes the document to the LevelDB pack in `dist/`.
+</Step>
+
+<Step title="Extract the pack back to JSON">
+Once your edits are saved in Foundry, run `extractPacks` to export the updated LevelDB back to the source JSON files:
+
+```bash
+# Replace <pack-folder-name> with the folder name under packs/pf2e/
+pnpm run extractPacks <pack-folder-name> --system=pf2e
+
+# Examples:
+pnpm run extractPacks feats --system=pf2e
+pnpm run extractPacks conditions --system=pf2e
+pnpm run extractPacks pathfinder-bestiary --system=pf2e
+```
+
+The extractor writes individual JSON files into `packs/pf2e/<pack-folder-name>/`, sorted by entry name.
+</Step>
+
+<Step title="Review the diff and open a pull request">
+Run `git diff` to inspect the generated JSON changes. Check that:
+- Only the entries you intended to change are modified.
+- The `_id` field is unchanged on any existing entry.
+- No stray world data (actor IDs, folder references from your local world) leaked in.
+
+Stage the relevant files, commit, push your branch, and open a PR against `master`.
+</Step>
+
+</Steps>
+
+## Content guidelines
+
+### Names
+
+Name entries exactly as they appear in the source material. The only exception: replace square brackets (`[` and `]`) with parentheses, or omit them entirely. Foundry treats brackets as part of its enricher syntax, so square brackets in names cause display problems.
+
+```
+# Correct
+Fire (Greater)
+Fire (Lesser)
+
+# Incorrect — square brackets break the enricher
+Fire [Greater]
+```
+
+### Embedded links
+
+When one entry references another — for example, a feat that points to a condition — use the `@UUID` format with the entity's **name**, not its `_id`:
+
+```html
+@UUID[Compendium.pf2e.conditionitems.Item.Blinded]
+```
+
+Referencing by name (not ID) makes links resilient to database rebuilds and easier to review in diffs. The build tool resolves names to IDs at compile time, so the emitted LevelDB always contains valid ID references.
+
+### Publication metadata
+
+Every entry should include a `publication` block in its `system` field:
+
+```json
+"publication": {
+    "license": "ORC",
+    "remaster": true,
+    "title": "Pathfinder Player Core"
+}
+```
+
+Use `"ORC"` for Pathfinder remaster content and `"OGL"` for pre-remaster content. The `title` must match the book name as printed on its cover.
+
+### Art
+
+Do not submit new artwork — especially copyrighted artwork — without first receiving clearance from the copyright holders and the repository maintainers. The project uses free or openly licensed icons for generic items.
+
+## Entry JSON reference
+
+Every JSON file shares the same top-level structure regardless of type:
+
+```json
+{
+    "_id": "PodajLVxqYSAqVox",
+    "name": "Natural Ambition",
+    "type": "feat",
+    "img": "icons/sundries/books/book-red-exclamation.webp",
+    "system": { ... },
+    "folder": "hFVleadZ20Wc5Hkc"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `_id` | Stable 16-character base62 identifier. See the warning below about IDs. |
+| `name` | Display name, exactly as in the source book. |
+| `type` | PF2e item or actor type (e.g. `feat`, `ancestry`, `condition`, `npc`). |
+| `img` | Icon path relative to the Foundry data root. |
+| `system` | Type-specific data. Shape is defined by the corresponding TypeScript schema. |
+| `folder` | Optional. Foundry folder ID for grouping within the compendium browser. |
+
+<Warning>
+`_id` values are stable identifiers used by other entries, macros, and modules to reference this document. **Never change the `_id` of an existing entry.** Changing an ID silently breaks every `@UUID` link pointing at that document across all worlds.
+</Warning>
+
+## Rule elements in compendium items
+
+Most mechanical effects — modifiers, granted items, choice prompts, auras — are encoded in the `system.rules` array as rule element objects. These are evaluated at runtime by the rules engine and do not require any special build step.
+
+Here is the full `Natural Ambition` feat from `packs/pf2e/feats/ancestry/human/level-1/natural-ambition.json`, which uses a `ChoiceSet` to let the player pick any level-1 class feat, and a `GrantItem` to apply the choice:
+
+```json
+{
+    "_id": "PodajLVxqYSAqVox",
+    "name": "Natural Ambition",
+    "type": "feat",
+    "img": "icons/sundries/books/book-red-exclamation.webp",
+    "system": {
+        "actionType": { "value": "passive" },
+        "category": "ancestry",
+        "description": {
+            "value": "<p>You were raised to be ambitious…</p>"
+        },
+        "level": { "value": 1 },
+        "prerequisites": { "value": [] },
+        "publication": {
+            "license": "ORC",
+            "remaster": true,
+            "title": "Pathfinder Player Core"
+        },
+        "rules": [
+            {
+                "adjustName": false,
+                "choices": {
+                    "filter": [
+                        "item:level:1",
+                        "item:category:class",
+                        "item:trait:{actor|system.details.class.trait}"
+                    ],
+                    "itemType": "feat"
+                },
+                "flag": "naturalAmbition",
+                "key": "ChoiceSet",
+                "prompt": "PF2E.SpecificRule.Prompt.LevelOneClassFeat"
+            },
+            {
+                "key": "GrantItem",
+                "uuid": "{item|flags.system.rulesSelections.naturalAmbition}"
+            }
+        ],
+        "traits": {
+            "rarity": "common",
+            "value": ["human"]
+        }
+    }
+}
+```
+
+For the full list of available rule element keys and their options, see the [Rule Elements overview](/rule-elements/overview).
+
+## When can new content be added?
+
+<AccordionGroup>
+
+<Accordion title="ORC and OGL content from Paizo">
+New rulebook content can be added as soon as its street release date is reached. Do not commit content from an embargo before that date, even if you have advance access. The project's policy is to wait for the public release.
+
+For the Pathfinder remaster line (Player Core, GM Core, Monster Core, etc.), use `"license": "ORC"`. For pre-remaster content (Core Rulebook, Bestiary 1–3 under the original OGL), use `"license": "OGL"`.
+</Accordion>
+
+<Accordion title="Content from third-party sources">
+Third-party ORC or OGL content may be submitted, but the maintainers review these on a case-by-case basis. Open an issue or ask on Discord before spending significant effort, to confirm the content is in scope.
+</Accordion>
+
+<Accordion title="Paizo flavor text and setting material">
+Mechanical rules text (stat blocks, feat descriptions that describe a mechanical effect) under ORC or OGL can be freely included. Paizo-specific setting flavor — lore, fiction excerpts, proper nouns tied to the Golarion IP — may have additional restrictions. When in doubt, trim flavor text to the mechanical content and ask a maintainer.
+</Accordion>
+
+</AccordionGroup>
+
+## Linting and style
+
+The project uses [Prettier](https://prettier.io/) to enforce consistent JSON formatting across all pack files. The CI pipeline blocks merges that fail the linter. To fix formatting locally:
+
+```bash
+npm run lint:fix
+```

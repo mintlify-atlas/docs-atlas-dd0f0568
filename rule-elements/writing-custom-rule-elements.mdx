@@ -1,0 +1,399 @@
+---
+title: "Writing Custom Rule Elements"
+description: "How module developers can extend the RuleElement base class to add new mechanical behaviors to the PF2e system."
+keywords: ["custom rule elements", "module development", "RuleElement", "synthetics", "TypeScript", "foundry pf2e"]
+---
+
+This guide is for **module developers** who want to define new mechanical behaviors that the built-in rule elements do not cover. You will extend the abstract `RuleElement` class, define a data schema, and push your results into the actor's synthetics.
+
+<Warning>
+  Custom rule elements are tightly coupled to the system's internal data preparation pipeline. System updates that change the shape of `actor.synthetics`, the `RuleElement` base class interface, or the data model API may break your module. Pin your module to a compatible system version range and test after every system release.
+</Warning>
+
+## Prerequisites
+
+- Familiarity with [Foundry DataModel](https://foundryvtt.com/article/v10-data-model/) and its field types.
+- A working TypeScript (or JavaScript) module targeting the PF2e system.
+- An understanding of [Rule Elements Overview](/rule-elements/overview) — specifically the lifecycle hooks and the synthetics object.
+
+## Step 1: Extend RuleElement
+
+Import `RuleElement` from the system's global exports and create a subclass. You must implement `static defineSchema()` and at least one lifecycle hook.
+
+```typescript
+// src/rules/bonus-to-initiative.ts
+import type { RuleElementPF2e, RuleElementSource, RuleElementSchema } from "../types/pf2e.ts";
+
+// The system exposes RuleElement on the global CONFIG object:
+const { RuleElement } = game.pf2e.system.ruleElements;
+
+class BonusToInitiativeRuleElement extends RuleElement {
+  /**
+   * Define the schema for this rule element's data.
+   * Fields defined here are validated, cleaned, and available as
+   * typed properties on `this`.
+   */
+  static override defineSchema() {
+    const fields = foundry.data.fields;
+    return {
+      ...super.defineSchema(),  // always include the base fields
+      bonus: new fields.NumberField({
+        required: true,
+        nullable: false,
+        integer: true,
+        initial: 0,
+      }),
+      bonusType: new fields.StringField({
+        required: true,
+        choices: ["circumstance", "status", "item", "untyped"],
+        initial: "untyped",
+      }),
+    };
+  }
+
+  /** Push a deferred modifier into actor.synthetics.modifiers */
+  override beforePrepareData() {
+    if (this.ignored) return;
+
+    const modifiers = (this.actor.synthetics.modifiers["initiative"] ??= []);
+    modifiers.push(() => {
+      // Test predicate at roll time, not here
+      if (!this.test()) return null;
+
+      return new game.pf2e.Modifier({
+        slug: this.slug ?? "custom-initiative-bonus",
+        label: this.label,
+        modifier: this.bonus,
+        type: this.bonusType,
+        source: this.item.uuid,
+      });
+    });
+  }
+}
+```
+
+## Step 2: Register the rule element
+
+Register your class with the system's rule element registry so that the `key` field in JSON can resolve to your class. Do this in your module's `init` hook, before any actors are prepared:
+
+```typescript
+// src/module.ts
+Hooks.once("init", () => {
+  // Use game.pf2e.RuleElements.custom for module-provided rule elements.
+  // Do NOT add to .builtin — that is reserved for system internals.
+  game.pf2e.RuleElements.custom["BonusToInitiative"] = BonusToInitiativeRuleElement;
+});
+```
+
+Once registered, authors can use your rule element in any item:
+
+```json
+{
+  "key": "BonusToInitiative",
+  "bonus": 2,
+  "bonusType": "circumstance",
+  "label": "Alert Stance",
+  "predicate": ["stance:alert"]
+}
+```
+
+## Key methods to override
+
+The following methods are defined as optional interfaces on `RuleElement` in `base.ts:364`. Implement only the ones relevant to your rule element.
+
+<AccordionGroup>
+  <Accordion title="static defineSchema() — data model definition">
+    Called once when the class is first used. Return an object whose keys are property names and values are Foundry `DataField` instances. The base class fields (`key`, `slug`, `label`, `priority`, `ignored`, `predicate`, `requiresEquipped`, `requiresInvestment`) are provided by `super.defineSchema()` and should always be spread in.
+
+    ```typescript
+    static override defineSchema() {
+      const fields = foundry.data.fields;
+      return {
+        ...super.defineSchema(),
+        // A required numeric value
+        value: new fields.NumberField({ required: true, nullable: false, initial: 0 }),
+        // An optional string with choices
+        mode: new fields.StringField({
+          required: false,
+          choices: ["add", "upgrade"],
+          initial: "add",
+        }),
+        // A resolvable value (number or formula string)
+        dynamicValue: new ResolvableValueField({ required: false, nullable: false, initial: 0 }),
+      };
+    }
+    ```
+
+    The `ResolvableValueField` type (from `rule-element/data.ts`) accepts both literal numbers and Foundry roll formula strings and is the right choice for any numeric value that authors might want to scale by level or attribute.
+  </Accordion>
+
+  <Accordion title="beforePrepareData() — push to synthetics">
+    Runs at the start of `Actor#prepareDerivedData`, before statistics are finalized. This is the standard place to register deferred modifiers, damage dice, roll notes, and roll options.
+
+    ```typescript
+    override beforePrepareData(): void {
+      if (this.ignored) return;  // always check this first
+
+      // Modifiers must be pushed as factory functions (DeferredValue<Modifier>)
+      // so that predicates are evaluated at roll time, not here.
+      const construct = () => {
+        if (!this.test()) return null;  // evaluate predicate with current roll options
+        return new game.pf2e.Modifier({
+          slug: "my-modifier",
+          label: this.label,
+          modifier: Number(this.resolveValue(this.value)),
+          type: "circumstance",
+          source: this.item.uuid,
+        });
+      };
+
+      const modifiers = (this.actor.synthetics.modifiers["perception"] ??= []);
+      modifiers.push(construct);
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="afterPrepareData() — read finalized values">
+    Runs after all `beforePrepareData` hooks and after the actor's full statistics are computed. Use this when you need to read a value that is not available until the end of preparation.
+
+    ```typescript
+    override afterPrepareData(): void {
+      if (this.ignored) return;
+      // At this point actor.system.attributes.ac.value is finalized
+      const finalAC = this.actor.system.attributes.ac.value;
+      // You can push more synthetics here if needed
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="onApplyActiveEffects() — AE phase">
+    Runs during Foundry's `Actor#applyActiveEffects` phase, which runs before `beforePrepareData`. Use this for the same early writes that `AELike` with `phase: "applyAEs"` performs — setting base values before derived stats are computed.
+
+    ```typescript
+    override onApplyActiveEffects(): void {
+      if (this.ignored) return;
+      // Direct property write at the earliest phase
+      fu.setProperty(this.actor, "system.attributes.speed.value", 35);
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="beforeRoll(domains, rollOptions) — modify a pending check">
+    Called just before a check roll is made. `domains` is the array of roll selectors for the check; `rollOptions` is the `Set<string>` of currently accumulated options you can add to.
+
+    ```typescript
+    override beforeRoll(domains: string[], rollOptions: Set<string>): void {
+      if (this.ignored) return;
+      if (domains.includes("attack-roll")) {
+        // Inject an extra roll option that other REs can see
+        rollOptions.add("my-module:flanking-bonus");
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="afterRoll(params) — post-roll effects">
+    Called after a check roll resolves. The `params` object (`base.ts:482`) includes:
+    - `roll`: the resolved `CheckRoll`
+    - `check`: the `CheckModifier` with the full modifier list
+    - `context`: the `CheckCheckContext`
+    - `domains`: roll selector domains
+    - `rollOptions`: the final `Set<string>` of options used
+
+    ```typescript
+    override async afterRoll({ roll, rollOptions }: RuleElement.AfterRollParams): Promise<void> {
+      if (this.ignored) return;
+      if (roll.degreeOfSuccess === 2) { // success
+        // e.g., delete this effect after a successful roll
+        await this.item.delete();
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="onCreate(actorUpdates) — item added to actor">
+    Runs once when the parent item is first added to an actor. Use this to set initial values on the actor (e.g., granting temporary HP, setting a flag). The `actorUpdates` record is passed to `actor.update()` after all `onCreate` hooks have run.
+
+    ```typescript
+    override onCreate(actorUpdates: Record<string, unknown>): void {
+      // Set a flag on the actor
+      actorUpdates["flags.my-module.activeCount"] =
+        (this.actor.flags["my-module"]?.activeCount ?? 0) + 1;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="onDelete(actorUpdates) — item removed from actor">
+    The mirror of `onCreate`. Called when the parent item is removed from the actor. Clean up anything you set in `onCreate`.
+
+    ```typescript
+    override onDelete(actorUpdates: Record<string, unknown>): void {
+      const current = this.actor.flags["my-module"]?.activeCount ?? 1;
+      actorUpdates["flags.my-module.activeCount"] = Math.max(0, current - 1);
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="onUpdateEncounter(data) — turn and initiative events">
+    Called at two encounter events:
+    - `"initiative-roll"` — when the actor rolls for initiative
+    - `"turn-start"` — at the start of the actor's turn
+
+    ```typescript
+    override async onUpdateEncounter(
+      data: { event: "initiative-roll" | "turn-start"; actorUpdates: Record<string, unknown> }
+    ): Promise<void> {
+      if (data.event === "turn-start") {
+        // e.g., reduce a counter at the start of each turn
+        const remaining = this.actor.getFlag("my-module", "charges") ?? 0;
+        if (remaining > 0) {
+          data.actorUpdates["flags.my-module.charges"] = remaining - 1;
+        }
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Working with synthetics
+
+The `actor.synthetics` object (`src/module/rules/synthetics.ts:34`) is where rule elements deposit their contributions during data preparation. Writing to synthetics is the correct way to contribute to statistics — do not write directly to `actor.system` in `beforePrepareData` unless you are implementing AELike-style direct overrides.
+
+### Key synthetics properties
+
+| Property | Type | Usage |
+|---|---|---|
+| `synthetics.modifiers[selector]` | `DeferredModifier[]` | Push factory functions that return `Modifier \| null` |
+| `synthetics.damageDice[selector]` | `DeferredDamageDice[]` | Push factory functions that return `DamageDicePF2e \| null` |
+| `synthetics.rollNotes[selector]` | `RollNotePF2e[]` | Push `RollNotePF2e` instances directly |
+| `synthetics.rollOptions` | managed by `RollOption` RE | Do not write directly; use `RollOption` RE or the `RollOption` API |
+| `synthetics.strikes[slug]` | `DeferredStrike` | Register a factory function that returns a synthetic `WeaponPF2e` |
+| `synthetics.senses` | `SenseSynthetic[]` | Push `{ sense, predicate, force }` objects |
+| `synthetics.toggles` | `Record<domain, Record<option, RollOptionToggle>>` | Managed by `RollOption` RE with `toggleable: true` |
+
+### Deferred values
+
+Modifiers and damage dice are **deferred**: they are stored as factory functions and evaluated only when a roll is about to happen. This lets the system evaluate predicates against the roll's specific options at call time.
+
+```typescript
+// Push a deferred modifier factory:
+const modifiers = (this.actor.synthetics.modifiers["athletics"] ??= []);
+modifiers.push((options) => {
+  // options.test contains the roll options at roll time
+  if (!this.resolveInjectedProperties(this.predicate).test(options.test ?? [])) {
+    return null;
+  }
+  return new game.pf2e.Modifier({
+    slug: "my-mod",
+    label: this.label,
+    modifier: 2,
+    type: "circumstance",
+    source: this.item.uuid,
+  });
+});
+```
+
+## Resolving dynamic values
+
+The `resolveValue(value, default, options)` method on `base.ts:294` evaluates a field that may be a literal number or a Foundry roll formula string:
+
+```typescript
+// value may be: 5, "@actor.level", "floor(@actor.level / 2)", or a bracket object
+const resolved = Number(this.resolveValue(this.value, 0));
+```
+
+The `resolveInjectedProperties(source)` method on `base.ts:223` replaces `{actor|...}`, `{item|...}`, and `{rule|...}` placeholders in strings:
+
+```typescript
+const selector = this.resolveInjectedProperties(this.selector);
+// "{item|id}-damage" becomes "xGDc7tMlvBkN4hjQ-damage"
+```
+
+## Validation and error handling
+
+Use `this.failValidation(...messages)` (`base.ts:187`) to mark a rule element invalid and log a warning:
+
+```typescript
+override beforePrepareData(): void {
+  if (this.ignored) return;
+  if (this.value < 0) {
+    this.failValidation("value must be non-negative");
+    return;
+  }
+  // ...
+}
+```
+
+Calling `failValidation` sets `this.ignored = true`, so any subsequent lifecycle hook checks `if (this.ignored) return` and exits early.
+
+For schema-level validation (structure, not logic), use `static validateJoint(data)`:
+
+```typescript
+static override validateJoint(data: fields.SourceFromSchema<MySchema>): void {
+  super.validateJoint(data);
+  if (data.mode === "multiply" && data.value === 0) {
+    throw new Error("multiplying by zero has no effect");
+  }
+}
+```
+
+## Complete minimal example
+
+The following is a complete, self-contained custom rule element that adds a circumstance bonus to Perception equal to half the actor's level, but only while the actor has a `"custom:vigilant"` roll option active.
+
+```typescript
+// src/rules/vigilant-perception.ts
+
+// game.pf2e.RuleElement is the base class
+const RuleElement = game.pf2e.RuleElement;
+
+class VigilantPerceptionRuleElement extends RuleElement {
+  static override defineSchema() {
+    return {
+      ...super.defineSchema(),
+      // No additional fields needed; we use the actor's level directly
+    };
+  }
+
+  override beforePrepareData(): void {
+    if (this.ignored) return;
+
+    const construct = (options = {}) => {
+      if (!this.test(options.test)) return null;
+
+      const bonus = Math.floor(this.actor.level / 2);
+      if (bonus <= 0) return null;
+
+      return new game.pf2e.Modifier({
+        slug: this.slug ?? "vigilant-perception",
+        label: this.label,
+        modifier: bonus,
+        type: "circumstance",
+        source: this.item.uuid,
+      });
+    };
+
+    const modifiers = (this.actor.synthetics.modifiers["perception"] ??= []);
+    modifiers.push(construct);
+  }
+}
+
+// Register in your module's init hook:
+Hooks.once("init", () => {
+  game.pf2e.RuleElements.custom["VigilantPerception"] = VigilantPerceptionRuleElement;
+});
+```
+
+Use it on an item:
+
+```json
+{
+  "key": "VigilantPerception",
+  "label": "Vigilant Perception",
+  "predicate": ["custom:vigilant"]
+}
+```
+
+<Tip>
+  Use the **Roll Inspector** (the magnifying glass on a roll result in chat) to verify that your modifier appears in the breakdown and that your predicate is being evaluated correctly.
+</Tip>

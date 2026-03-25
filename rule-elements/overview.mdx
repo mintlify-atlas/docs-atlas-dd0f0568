@@ -1,0 +1,195 @@
+---
+title: "Rule Elements Overview"
+description: "Understand how Rule Elements work in the PF2e system: their structure, lifecycle, and how to configure them on items."
+keywords: ["rule elements", "rules tab", "predicate", "synthetics", "foundry pf2e"]
+---
+
+Rule Elements are JSON-configured entries stored in an item's **Rules** tab. When a character owns that item and the item is active, each rule element runs during actor data preparation and contributes to the actor's *synthetic* data — modifiers, roll options, damage dice, notes, and more — without writing anything back to the database.
+
+<Info>
+  The **Rules** tab is hidden by default. Enable it under **Game Settings → System Settings → Advanced Rule Element UI**.
+</Info>
+
+## What rule elements do
+
+Every rule element is an instance of the abstract `RuleElement` class (`src/module/rules/rule-element/base.ts`). Each concrete subclass — `FlatModifierRuleElement`, `AELikeRuleElement`, `RollOptionRuleElement`, and so on — has a `key` value like `"FlatModifier"` that the system uses to look up the correct class when deserializing item data.
+
+When an actor's data is prepared, the system:
+
+1. Collects all rule elements from every item the actor owns.
+2. Sorts them by `priority` (ascending).
+3. Runs each rule element through the appropriate lifecycle hooks.
+4. Reads the populated `actor.synthetics` object to build final statistics, roll pools, and UI displays.
+
+## Base schema fields
+
+Every rule element shares the following fields, defined in `RuleElement.defineSchema()` (`base.ts:54`):
+
+<ParamField path="key" type="string" required>
+  The rule element type to use. Must match a registered `RuleElement` subclass, for example `"FlatModifier"`, `"AELike"`, `"RollOption"`, `"GrantItem"`. This is the only field you must always provide.
+</ParamField>
+
+<ParamField path="slug" type="string | null">
+  An optional kebab-case identifier for this rule element. Some rule element types use the slug to deduplicate synthetics or to expose the result as an injectable property (e.g. `{rule|slug}`).
+</ParamField>
+
+<ParamField path="label" type="string">
+  A human-readable label used in roll breakdowns and tooltips. Accepts a localization key or a plain string. If omitted, the parent item's name is used. You can use injected properties here, e.g. `"{item|name}: bonus"`.
+</ParamField>
+
+<ParamField path="priority" type="number" default="100">
+  Controls the order in which rule elements are applied during data preparation. Lower numbers run first. Most rule elements default to `100`; AELike rule elements use priority values based on their `mode` (e.g. `multiply` = 10, `add` = 20, `override` = 50).
+</ParamField>
+
+<ParamField path="ignored" type="boolean" default="false">
+  When `true`, this rule element is completely skipped. The system sets this automatically when validation fails, when the parent item is unequipped and `requiresEquipped` is true, or when the item is uninvested and `requiresInvestment` is true. You can also set it manually to disable a rule.
+</ParamField>
+
+<ParamField path="predicate" type="PredicateStatement[]" default="[]">
+  An array of predicate statements. All statements must pass for the rule element to apply. An empty array always passes. See [Predicates](#predicates) below.
+</ParamField>
+
+<ParamField path="requiresEquipped" type="boolean | null">
+  For physical items (weapons, armor, equipment), this defaults to `true` — the rule element only applies while the item is equipped. Set to `false` to apply the rule even when the item is unequipped (e.g. a carried item). Non-physical items ignore this field.
+</ParamField>
+
+<ParamField path="requiresInvestment" type="boolean | null">
+  For investable items, defaults to `true` when `requiresEquipped` is true and the item supports investment. Set to `false` to apply the rule without requiring the item to be invested.
+</ParamField>
+
+## Complete example
+
+The following JSON adds a +2 circumstance bonus to Perception while the actor is Seeking. Place it in the item's Rules tab array:
+
+```json
+{
+  "key": "FlatModifier",
+  "selector": "perception",
+  "type": "circumstance",
+  "value": 2,
+  "label": "PF2E.Actions.Seek.Title",
+  "priority": 100,
+  "requiresEquipped": true,
+  "predicate": ["action:seek"]
+}
+```
+
+An item can carry any number of rule elements. The full `system.rules` array on an item source looks like:
+
+```json
+{
+  "system": {
+    "rules": [
+      {
+        "key": "RollOption",
+        "domain": "all",
+        "option": "my-custom-feature",
+        "value": true
+      },
+      {
+        "key": "FlatModifier",
+        "selector": "athletics",
+        "type": "item",
+        "value": 2,
+        "predicate": ["my-custom-feature"]
+      }
+    ]
+  }
+}
+```
+
+## Predicates
+
+Predicates let you make a rule element conditional. The `predicate` field accepts an array of *statements*. For the rule to apply, **every** statement in the array must be true against the current set of active roll options.
+
+```typescript
+// From src/module/system/predication.ts:35
+test(options: Set<string> | string[]): boolean {
+    if (this.length === 0) {
+        return true;   // empty predicate always passes
+    }
+    const domain = options instanceof Set ? options : new Set(options);
+    return this.every((s) => this.#isTrue(s, domain));
+}
+```
+
+### Statement types
+
+| Statement | Meaning |
+|---|---|
+| `"item:trait:fire"` | The current item has the fire trait |
+| `"class:fighter"` | The actor is a fighter |
+| `"action:seek"` | The Seek action roll option is active |
+| `{ "or": ["a", "b"] }` | Either `a` or `b` is true |
+| `{ "not": "condition:frightened" }` | The actor is not frightened |
+| `{ "and": ["a", "b"] }` | Both `a` and `b` are true |
+| `{ "gt": ["actor:level", 5] }` | The actor is above level 5 |
+
+### Common roll options
+
+Roll options are the strings that predicates test against. They are computed at roll time and include options like:
+
+- `class:<slug>` — the actor's class (e.g. `class:fighter`)
+- `item:trait:<trait>` — traits of the item being rolled
+- `action:<slug>` — the action being performed
+- `self:condition:<condition>` — conditions on the actor
+- `check:type:attack-roll` — the type of check being made
+
+<Tip>
+  Open the **Roll Inspector** (the magnifying glass icon on a roll result) to see the full list of active roll options and which rule elements contributed to a specific roll. This is the fastest way to debug a predicate that is not firing.
+</Tip>
+
+## Injected properties
+
+String values in a rule element can reference live data from the actor, item, or rule element itself using `{source|path}` syntax:
+
+```json
+{
+  "key": "RollNote",
+  "selector": "will",
+  "text": "<b>{item|name}</b> grants a +2 bonus vs. {rule|slug}."
+}
+```
+
+Supported sources are `actor`, `item`, and `rule`. The path is resolved with Foundry's `getProperty` utility.
+
+## Lifecycle hooks
+
+Rule elements participate in the actor's data preparation through optional hook methods. Each method is called at a specific phase; you only need to implement the phases you use.
+
+| Method | When it runs |
+|---|---|
+| `onApplyActiveEffects()` | During Foundry's built-in `Actor#applyActiveEffects` phase, before derived data is prepared. AELike rule elements with `phase: "applyAEs"` use this. |
+| `beforePrepareData()` | At the start of `Actor#prepareDerivedData`. This is the most common hook — most rule elements push synthetics here. |
+| `afterPrepareData()` | After all other preparation callbacks have run. Use this when you need to read fully-computed values. |
+| `beforeRoll(domains, rollOptions)` | Just before a check roll, with the roll's applicable domains and accumulated options. |
+| `afterRoll(params)` | After a check roll resolves. Use for effects that trigger on a roll, such as removing a one-use effect. |
+| `onCreate(actorUpdates)` | When the parent item is first added to an actor. Useful for setting initial actor values. |
+| `onDelete(actorUpdates)` | When the parent item is removed from an actor. Use to clean up any persistent changes made in `onCreate`. |
+| `onUpdateEncounter(data)` | At encounter events: `"initiative-roll"` and `"turn-start"`. |
+| `preCreate(args)` | Before the parent item is saved to the actor. Can modify item source or pending items list. |
+| `preDelete(args)` | Before the parent item is removed. Can cancel or redirect the deletion. |
+
+<Note>
+  The `beforePrepareData` and `afterPrepareData` hooks run on every actor update, including updates that have nothing to do with your item. Keep these methods performant.
+</Note>
+
+## Synthetics
+
+Rule elements write their results into `actor.synthetics` — a plain object that accumulates contributions from all rule elements before the actor's final statistics are computed. The `RuleElementSynthetics` interface (`src/module/rules/synthetics.ts:34`) defines its shape:
+
+```typescript
+interface RuleElementSynthetics {
+    damageDice: DamageDiceSynthetics;
+    modifierAdjustments: ModifierAdjustmentSynthetics;
+    modifiers: ModifierSynthetics;        // keyed by selector/domain
+    rollNotes: Record<string, RollNotePF2e[]>;
+    rollOptions: ...;                     // managed by RollOption RE
+    senses: SenseSynthetic[];
+    strikes: Record<string, DeferredStrike>;
+    toggles: Record<string, Record<string, RollOptionToggle>>;
+    // ... and more
+}
+```
+
+Modifiers are stored as *deferred* factory functions rather than resolved values, so predicates are not evaluated until a roll actually occurs.

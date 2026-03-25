@@ -1,0 +1,133 @@
+---
+title: "Contributing Workflow"
+description: "How to submit changes to the PF2e for Foundry VTT project."
+---
+
+The project welcomes contributions from both maintainers and the community. This page covers the Git workflow, pull request process, compendium content guidelines, and CI behavior.
+
+## Branching Model
+
+The project uses a modified [GitLab flow](https://about.gitlab.com/topics/version-control/what-is-gitlab-flow/):
+
+- **`master`** — the active development branch. All pull requests target `master`.
+- **`release`** — mirrors `master` at a specific point in history. This is the branch users consume for stable releases.
+
+Do not open pull requests against `release`.
+
+## Contribution Steps
+
+<Steps>
+  <Step title="Get access to the repository">
+    You have two options:
+
+    - **Fork** the repository on GitHub and work from your fork.
+    - **Request contributor access** by reaching out on the Foundry Discord server in the `#pf2e` channel at [discord.gg/pf2e](https://discord.gg/pf2e). Maintainers can add you directly to the project.
+  </Step>
+
+  <Step title="Create a feature or fix branch">
+    Branch from `master`:
+
+    ```bash
+    git checkout master
+    git pull
+    git checkout -b my-feature-or-fix
+    ```
+
+    Keep branches focused on a single logical change to make review easier.
+  </Step>
+
+  <Step title="Make your changes">
+    Write your code following the [code style guidelines](/contributing/code-style). Ensure you use the correct path aliases, avoid `any`, and write type-safe TypeScript.
+
+    For compendium content, see the [Compendium Workflow](#compendium-workflow) section below.
+  </Step>
+
+  <Step title="Run tests and linting">
+    Before pushing, run the full test suite. The `pretest` hook automatically runs the linter first:
+
+    ```bash
+    npm run test
+    ```
+
+    This is equivalent to:
+
+    ```bash
+    npm run lint   # eslint + prettier check on SCSS and Svelte files
+    jest           # Jest test suite with jsdom
+    ```
+
+    Fix any lint errors before submitting. You can auto-fix most style issues with:
+
+    ```bash
+    npm run lint:fix
+    ```
+  </Step>
+
+  <Step title="Open a Pull Request">
+    Push your branch and open a pull request on GitHub targeting the `master` branch.
+
+    **PR title guidelines:**
+    - Use imperative mood: "Add spell resistance rule element" not "Added" or "Adds"
+    - Be clear and concise about what is changing
+
+    **PR description:**
+    - Explain the *why* behind the change if it is not obvious from the title
+    - Reference any related issues
+
+    CI must pass before a maintainer will merge the PR.
+  </Step>
+</Steps>
+
+## Compendium Workflow
+
+Compendium data (spells, feats, bestiary entries, equipment, etc.) is stored as JSON files under `packs/`. The correct way to contribute compendium changes is:
+
+1. **Edit items directly in Foundry.** Load your development build, open the relevant compendium, and make your changes to the documents inside Foundry's interface.
+2. **Export changes back to source.** After saving your edits in Foundry, run the extract script:
+
+   ```bash
+   pnpm run extractPacks <compendium-db-filename> --system=pf2e
+   ```
+
+   Replace `<compendium-db-filename>` with the name of the compendium you edited (for example, `pathfinder-bestiary` or `spells`). This regenerates the JSON files in `packs/` from the live database.
+
+3. **Review the diff and commit.** Check the generated JSON diff to ensure only your intended changes appear.
+
+### Content naming rules
+
+When adding new entities (spells, feats, equipment, NPC abilities, etc.):
+
+- Name entities **exactly as they appear in the source material**. Do not paraphrase or abbreviate.
+- **Replace square brackets** (`[` and `]`) with parentheses or omit them entirely, since square brackets conflict with Foundry's link syntax.
+- Use the `@Compendium` link format for cross-references, referencing entities **by name** rather than by ID for ease of maintenance:
+
+  ```
+  @Compendium[pf2e.pack-name.Entity Name]
+  ```
+
+<Warning>
+  Do not submit new artwork or graphics (especially anything that may be under copyright) without first obtaining clearance from the copyright holders and the repository maintainers.
+</Warning>
+
+## CI Behavior
+
+GitHub Actions runs the following checks on every pull request:
+
+- **ESLint** — lints all `.ts` and `.json` files
+- **Prettier** — checks formatting of SCSS and Svelte files
+- **Jest** — runs the unit test suite
+
+<Note>
+  If you are a **first-time contributor**, CI actions must be **manually triggered** by a project maintainer before they run on your PR. Once your first PR is merged into `master`, subsequent PRs will trigger CI automatically.
+</Note>
+
+GitHub CI will block merging of any PR that fails the test suite or style checks. Run `npm run test` locally before opening a PR to catch issues early.
+
+## Community
+
+The PF2e development team is active on the Foundry VTT Discord server. Join the `#pf2e` channel at [discord.gg/pf2e](https://discord.gg/pf2e) to:
+
+- Ask questions before starting a contribution
+- Get guidance on where a particular fix or feature belongs in the codebase
+- Request contributor access to the repository
+- Discuss design decisions with the maintainers

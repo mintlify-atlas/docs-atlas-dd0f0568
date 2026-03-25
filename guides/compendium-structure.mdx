@@ -1,0 +1,257 @@
+---
+title: 'Compendium structure'
+description: 'How PF2e for Foundry VTT stores, builds, and ships its 94 compendium packs.'
+keywords: ['compendium', 'packs', 'leveldb', 'build', 'json', 'extract']
+---
+
+The PF2e system ships 94 compendium packs containing every piece of game content — ancestries, classes, feats, spells, equipment, conditions, and hundreds of bestiary actors. Each pack is a directory of individual JSON files during development. The build process compiles those files into LevelDB databases that Foundry VTT reads at runtime.
+
+## On-disk layout
+
+All source JSON lives under `packs/pf2e/`. Each subdirectory maps 1:1 to one compendium pack registered in `system.pf2e.json`.
+
+```
+packs/
+└── pf2e/
+    ├── actions/                        # Basic actions (Stride, Strike, etc.)
+    ├── ancestries/                     # Ancestry entries (Human, Elf, Dwarf…)
+    ├── ancestry-features/              # Ancestry feats and innate features
+    ├── backgrounds/                    # Character backgrounds
+    ├── bestiary-ability-glossary-srd/  # Shared bestiary ability definitions
+    ├── bestiary-effects/               # Active effects applied by bestiary abilities
+    ├── bestiary-family-ability-glossary/ # Creature family shared abilities
+    ├── boons-and-curses/               # Divine intercession boons and curses
+    ├── campaign-effects/               # Long-running campaign-level effects
+    ├── class-features/                 # Class features and subclass options
+    ├── classes/                        # Class entries
+    ├── conditions/                     # All 43 PF2e conditions
+    ├── criticaldeck/                   # Critical hit and fumble deck entries
+    ├── deities/                        # Deity entries
+    ├── equipment/                      # All equipment items
+    ├── equipment-effects/              # Active effects applied by equipment
+    ├── familiar-abilities/             # Familiar and master abilities
+    ├── feat-effects/                   # Active effects applied by feats
+    ├── feats/                          # All feats (ancestry, class, general, skill)
+    ├── hazards/                        # Traps and environmental hazards
+    ├── heritages/                      # Ancestry heritage options
+    ├── iconics/                        # Paizo iconic pregenerated characters
+    ├── journals/                       # In-game journal references
+    ├── macros/                         # PF2e-specific macros
+    ├── action-macros/                  # Macros for system actions
+    ├── npc-gallery/                    # Non-combat NPCs
+    ├── other-effects/                  # Miscellaneous active effects
+    ├── paizo-pregens/                  # Adventure path pregenerated characters
+    ├── pathfinder-bestiary/            # Bestiary 1
+    ├── pathfinder-bestiary-2/          # Bestiary 2
+    ├── pathfinder-bestiary-3/          # Bestiary 3
+    ├── pathfinder-dark-archive/        # Dark Archive bestiary
+    ├── pathfinder-monster-core/        # Monster Core (remaster)
+    ├── pathfinder-monster-core-2/      # Monster Core 2
+    ├── pathfinder-npc-core/            # NPC Core
+    ├── pathfinder-society-boons/       # Pathfinder Society chronicle boons
+    ├── rollable-tables/                # Random rollable tables
+    ├── spell-effects/                  # Active effects applied by spells
+    ├── spells/                         # All spells
+    ├── vehicles/                       # Vehicle actors
+    ├── age-of-ashes-bestiary/          # Age of Ashes AP bestiary
+    ├── agents-of-edgewatch-bestiary/   # Agents of Edgewatch AP bestiary
+    │   ... (adventure path and PFS season bestiaries)
+    └── war-of-immortals-bestiary/      # War of Immortals bestiary
+```
+
+Some packs, particularly feats, nest their entries in subdirectories by category and level:
+
+```
+feats/
+├── ancestry/
+│   ├── human/
+│   │   ├── level-1/
+│   │   │   ├── natural-ambition.json
+│   │   │   ├── adapted-cantrip.json
+│   │   │   └── ...
+│   │   └── level-5/
+│   └── elf/
+├── class/
+├── general/
+├── skill/
+└── archetype/
+```
+
+The build tool discovers JSON files recursively, so subdirectory depth does not affect which pack an entry belongs to.
+
+## Pack registration in system.pf2e.json
+
+Every pack has a corresponding entry in the `packs` array of `system.pf2e.json`. This is what Foundry reads to discover the compendium:
+
+```json
+{
+    "name": "conditionitems",
+    "label": "Conditions",
+    "path": "packs/conditions",
+    "type": "Item",
+    "banner": "systems/pf2e/assets/compendium-banner/blue.webp",
+    "system": "pf2e",
+    "ownership": {
+        "PLAYER": "OBSERVER",
+        "ASSISTANT": "OWNER"
+    },
+    "flags": {}
+}
+```
+
+Key fields:
+
+| Field | Description |
+|-------|-------------|
+| `name` | The pack's stable identifier, used in `@UUID` links. |
+| `label` | The human-readable name shown in the Foundry compendium browser. |
+| `path` | Relative path to the built LevelDB directory inside `dist/`. |
+| `type` | Foundry document type: `Item`, `Actor`, `JournalEntry`, `RollTable`, or `Macro`. |
+| `ownership` | Default visibility for players and assistants. |
+
+### Naming conventions
+
+Core rulebook packs use short descriptive names: `ancestries`, `feats-srd`, `spells-srd`, `equipment-srd`, `conditionitems`.
+
+Adventure path and source-specific packs use a `<source-slug>-bestiary` pattern: `age-of-ashes-bestiary`, `blood-lords-bestiary`, `sky-kings-tomb-bestiary`. Pathfinder Society season packs follow `pfs-season-<N>-bestiary`.
+
+## JSON entry format
+
+Each JSON file represents one Foundry document. The top-level fields are the same regardless of content type:
+
+```json
+{
+    "_id": "XgEqL1kFApUbl5Z2",
+    "img": "systems/pf2e/icons/conditions/blinded.webp",
+    "name": "Blinded",
+    "type": "condition",
+    "system": { ... }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `_id` | A stable 16-character base62 identifier. Never change this for existing entries. |
+| `name` | Display name, must match the source book exactly (with the square-bracket exception noted below). |
+| `img` | Path to the icon, relative to the Foundry data root. |
+| `type` | Item or Actor type string recognised by the PF2e system. |
+| `system` | Type-specific game data. Shape varies by `type`. |
+
+### Condition example: Blinded
+
+The `conditions/blinded.json` file shows a condition with rule elements that enforce gameplay effects:
+
+```json
+{
+    "_id": "XgEqL1kFApUbl5Z2",
+    "img": "systems/pf2e/icons/conditions/blinded.webp",
+    "name": "Blinded",
+    "type": "condition",
+    "system": {
+        "description": {
+            "value": "<p>You can't see…</p>"
+        },
+        "duration": {
+            "expiry": null,
+            "unit": "unlimited",
+            "value": 0
+        },
+        "group": "senses",
+        "overrides": ["dazzled"],
+        "publication": {
+            "license": "ORC",
+            "remaster": true,
+            "title": "Pathfinder Player Core"
+        },
+        "rules": [
+            {
+                "key": "FlatModifier",
+                "selector": "perception",
+                "slug": "blinded",
+                "type": "status",
+                "value": -4
+            },
+            {
+                "key": "Immunity",
+                "type": "visual"
+            }
+        ],
+        "traits": { "value": [] },
+        "value": { "isValued": false, "value": null }
+    }
+}
+```
+
+Rule elements in `system.rules` are evaluated at runtime by the rules engine. See [Rule Elements overview](/rule-elements/overview) for the full reference.
+
+### Ancestry example: Human
+
+The `ancestries/human.json` file shows how an ancestry item encodes HP, movement speed, size, languages, and attribute boosts:
+
+```json
+{
+    "_id": "IiG7DgeLWYrSNXuX",
+    "img": "systems/pf2e/icons/ancestries/human.webp",
+    "name": "Human",
+    "type": "ancestry",
+    "system": {
+        "hp": 8,
+        "speed": 25,
+        "size": "med",
+        "hands": 2,
+        "vision": "normal",
+        "boosts": {
+            "0": { "value": ["cha", "con", "dex", "int", "str", "wis"] },
+            "1": { "value": ["str", "dex", "con", "int", "wis", "cha"] }
+        },
+        "languages": { "value": ["common"], "custom": "" },
+        "traits": { "rarity": "common", "value": ["human", "humanoid"] },
+        "publication": {
+            "license": "ORC",
+            "remaster": true,
+            "title": "Pathfinder Player Core"
+        },
+        "rules": []
+    }
+}
+```
+
+## The build process
+
+The `build:packs` script reads every JSON file from `packs/pf2e/`, validates them, resolves cross-pack `@UUID` references by name, and writes LevelDB databases into `dist/pf2e/packs/`.
+
+```bash
+# Build all packs into LevelDB (standard build)
+pnpm run build:packs
+
+# Build all packs and also emit JSON translation artifacts
+pnpm run build:packs:json
+```
+
+Internally, `build-packs.ts` calls `tsx ./build/build-packs.ts`. Passing `--json` sets the `json` flag, which tells `CompendiumPack.save()` to write flat JSON files alongside the LevelDB output. These JSON artifacts are used by translators and the i18n pipeline rather than by Foundry directly.
+
+<Note>
+The build script accepts a `--system` flag (`pf2e` or `sf2e`). Always pass `--system=pf2e` when working on the PF2e system to avoid accidentally building the wrong target.
+</Note>
+
+## Extracting packs back to JSON
+
+The `extractPacks` script runs in the opposite direction: it reads a compiled LevelDB pack from `dist/` and writes individual JSON files back into `packs/pf2e/`. This is the correct way to capture edits you make inside a running Foundry world.
+
+```bash
+# Extract a single pack (e.g. the conditions pack)
+pnpm run extractPacks conditions --system=pf2e
+
+# Extract all packs at once
+pnpm run extractPacks all --system=pf2e
+```
+
+The extractor pre-sorts entries by name before writing, which keeps diffs readable. You can disable this with `--disablePresort`.
+
+<Warning>
+Do not edit the JSON files under `packs/pf2e/` directly if you intend to round-trip through Foundry. Your changes will be overwritten the next time you run `extractPacks`. Make edits in Foundry, then extract.
+</Warning>
+
+## CompendiumBrowser
+
+In-game, the Compendium Browser searches across all loaded packs in real time. It applies type-specific filters — for example, the feat browser filters by category (ancestry, class, skill, general, archetype), level, and trait. The browser indexes entries from all packs whose document type matches the active tab, including third-party module packs that use the PF2e data model.

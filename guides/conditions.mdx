@@ -1,0 +1,197 @@
+---
+title: "Conditions"
+description: "The PF2e conditions system: all condition slugs, valued conditions, the programmatic API, and condition management."
+---
+
+Conditions in PF2e are persistent game-state effects with defined rules interactions. The system implements them as embedded `ConditionPF2e` items on actors, managed through the `ConditionManager` singleton and exposed via methods on `ActorPF2e`.
+
+## All Condition Slugs
+
+The authoritative list of condition slugs is in `src/module/item/condition/values.ts`:
+
+```typescript
+const CONDITION_SLUGS = new Set([
+  "blinded",          "broken",           "clumsy",
+  "concealed",        "confused",         "controlled",
+  "cursebound",       "dazzled",          "deafened",
+  "doomed",           "drained",          "dying",
+  "encumbered",       "enfeebled",        "fascinated",
+  "fatigued",         "fleeing",          "friendly",
+  "frightened",       "grabbed",          "helpful",
+  "hidden",           "hostile",          "immobilized",
+  "indifferent",      "invisible",        "malevolence",
+  "observed",         "off-guard",        "paralyzed",
+  "persistent-damage","petrified",        "prone",
+  "quickened",        "restrained",       "sickened",
+  "slowed",           "stunned",          "stupefied",
+  "unconscious",      "undetected",       "unfriendly",
+  "unnoticed",        "wounded",
+] as const);
+```
+
+---
+
+## Valued Conditions
+
+Some conditions carry a numeric value that stacks or degrades one step at a time. These are known as **valued conditions**.
+
+<AccordionGroup>
+  <Accordion title="frightened">
+    Imposes a status penalty equal to the value on all checks and DCs. Decreases by 1 at the end of each of the frightened creature's turns. Maximum value is typically 4.
+  </Accordion>
+  <Accordion title="clumsy">
+    Imposes a status penalty equal to the value on all Dexterity-based checks and DCs, including AC.
+  </Accordion>
+  <Accordion title="drained">
+    Imposes a status penalty equal to the value on Constitution-based checks and DCs, and reduces maximum HP.
+  </Accordion>
+  <Accordion title="enfeebled">
+    Imposes a status penalty equal to the value on all Strength-based checks and DCs.
+  </Accordion>
+  <Accordion title="sickened">
+    Imposes a status penalty equal to the value on all checks and DCs. Removing it requires a Fortitude save.
+  </Accordion>
+  <Accordion title="slowed">
+    The creature loses a number of actions each turn equal to the value.
+  </Accordion>
+  <Accordion title="stunned">
+    The creature loses actions equal to the value, consuming the condition's numeric value rather than reducing at end of turn.
+  </Accordion>
+  <Accordion title="stupefied">
+    Imposes a status penalty equal to the value on all Intelligence-, Wisdom-, and Charisma-based checks and DCs.
+  </Accordion>
+  <Accordion title="doomed">
+    Reduces the dying threshold. A creature that reaches its doomed + dying threshold dies.
+  </Accordion>
+  <Accordion title="wounded">
+    Increases the dying value when the creature falls unconscious again.
+  </Accordion>
+  <Accordion title="dying">
+    The creature is unconscious and making recovery checks. Dying 4 means death (reduced by doomed).
+  </Accordion>
+</AccordionGroup>
+
+<Info>
+  Valued conditions that reach 0 are automatically removed. The `ConditionManager.updateConditionValue` method enforces this and also caps `dying`, `wounded`, and `doomed` at their actor-specific maximums.
+</Info>
+
+---
+
+## ConditionManager
+
+`ConditionManager` (in `src/module/system/conditions/manager.ts`) is the static registry that stores canonical condition data loaded from the `pf2e.conditionitems` compendium.
+
+```typescript
+class ConditionManager {
+  // Map from slug (e.g., "frightened") or compendium UUID to
+  // the canonical ConditionPF2e document template.
+  static conditions: Map<ConditionSlug | ItemUUID, ConditionPF2e<null>>;
+
+  // Retrieve a condition template (with optional field overrides).
+  static getCondition(
+    slug: ConditionSlug,
+    modifications?: DeepPartial<ConditionSource>,
+  ): ConditionPF2e<null>;
+
+  // Set a valued condition to a specific numeric value.
+  // Passing value 0 removes the condition.
+  static async updateConditionValue(
+    itemId:        string,
+    actorOrToken:  ActorPF2e | TokenPF2e,
+    value:         number,
+  ): Promise<void>;
+}
+```
+
+The global shorthand is `game.pf2e.ConditionManager`.
+
+---
+
+## Programmatic Condition API
+
+All condition manipulation goes through methods on `ActorPF2e`.
+
+### Checking for a Condition
+
+```typescript
+// Returns true if the actor currently has any of the listed conditions.
+actor.hasCondition("prone");
+actor.hasCondition("frightened", "fleeing");  // OR – true if either is present
+```
+
+### Retrieving a Condition Instance
+
+```typescript
+// Returns the first matching ConditionPF2e, or null.
+const c = actor.getCondition("frightened");
+console.log(c?.value);  // e.g. 2
+
+// Returns ALL matching instances (persistent-damage can have multiples).
+const all = actor.getCondition("frightened", { all: true });
+```
+
+### Adding and Increasing Conditions
+
+```typescript
+// Apply frightened 2 to an actor.
+await actor.increaseCondition("frightened", { value: 2 });
+
+// Increase an existing valued condition by 1 (or apply at value 1 if absent).
+await actor.increaseCondition("sickened");
+
+// Apply a non-valued condition (e.g., prone).
+await actor.increaseCondition("prone");
+```
+
+`increaseCondition` is safe to call repeatedly — if the condition already exists and is valued, it increments the value; if it's non-valued, it does nothing (the condition is already present).
+
+### Removing and Decreasing Conditions
+
+```typescript
+// Decrease a valued condition by 1 (removes it if the value reaches 0).
+await actor.decreaseCondition("frightened");
+
+// Force-remove a condition regardless of its current value.
+await actor.decreaseCondition("grabbed", { forceRemove: true });
+```
+
+### Toggling Conditions
+
+```typescript
+// Toggle prone on/off.
+await actor.toggleCondition("prone");
+
+// Force-set active state explicitly.
+await actor.toggleCondition("prone", { active: true });
+await actor.toggleCondition("prone", { active: false });
+```
+
+---
+
+## Applying Conditions from Chat Cards
+
+When a spell or ability effect creates a condition, the chat card displays a button that players or the GM can click to apply it to the targeted token. The system resolves the target from `game.user.targets` at the time of the click.
+
+You can also drag any condition from the **Conditions** compendium tab directly onto a token or actor sheet to apply it.
+
+---
+
+## Condition Immunity
+
+If an actor has immunity to a condition (set via an `ActiveEffect` or rule element), the system prevents that condition from being applied and displays a notification. This is handled during `increaseCondition` before the embedded document is created.
+
+---
+
+## Metagame Privacy for Conditions
+
+The **Secret Condition** metagame setting (`game.pf2e.settings.metagame.secretCondition`) hides condition application messages from players when enabled. Only the GM sees the chat notification that a condition was applied.
+
+---
+
+## Effects Panel
+
+The **Effects Panel** (the small overlay on selected tokens) shows all active conditions and timed effects for the currently controlled token. Each condition displays its slug icon and, for valued conditions, its current numeric value. Clicking the icon increments the value; right-clicking decrements or removes it.
+
+<Tip>
+  Use the Effects Panel during play to quickly adjust valued conditions like `frightened` at the end of a creature's turn without opening the actor sheet.
+</Tip>

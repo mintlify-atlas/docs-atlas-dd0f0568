@@ -1,0 +1,145 @@
+---
+title: "Development Setup"
+description: "Get the PF2e system running locally for development."
+---
+
+This guide walks you through cloning the repository, installing dependencies, linking your local Foundry installation, and running a development build.
+
+## Prerequisites
+
+Before you begin, make sure you have the following installed:
+
+- **Node.js** `>=20.15.0` (as specified in `package.json` `engines` field)
+- **pnpm** — used as the primary package manager for build commands
+- **A local Foundry VTT installation** with a writable data directory
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the project from GitHub into your local development environment:
+
+    ```bash
+    git clone https://github.com/foundryvtt/pf2e.git
+    cd pf2e
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install all Node dependencies using the lockfile to ensure reproducible installs:
+
+    ```bash
+    npm ci
+    ```
+
+    This installs both `devDependencies` and `dependencies` as declared in `package.json`, including TypeScript, Vite, ESLint, Prettier, Jest, and Svelte.
+  </Step>
+
+  <Step title="Link to your Foundry data directory">
+    The build output lives in `dist/pf2e/`. For Foundry to pick it up, `dist/pf2e` must appear under your Foundry data folder at `Data/systems/pf2e`. The `link` script handles this interactively:
+
+    ```bash
+    npm run link
+    ```
+
+    You will be prompted for the full path to your Foundry data folder (e.g. `/home/user/.local/share/FoundryVTT/Data` on Linux, or `C:\Users\username\AppData\Local\FoundryVTT\Data` on Windows). The script creates a symbolic link from `dist/pf2e` to `Data/systems/pf2e`. If a folder or symlink already exists at that path, it asks whether to replace it.
+
+    <Note>
+      On Windows, you may need to run your terminal as Administrator for symlink creation to succeed.
+    </Note>
+  </Step>
+
+  <Step title="Build the system">
+    Run a one-off production build targeting the pf2e system:
+
+    ```bash
+    pnpm run build --system=pf2e
+    ```
+
+    This internally runs both `build:packs` and `build:system`. The system build invokes Vite (`build/build-system.ts`), which compiles `src/pf2e.ts` and outputs `dist/pf2e/pf2e.mjs`, `dist/pf2e/styles/pf2e.css`, and all static assets.
+  </Step>
+
+  <Step title="Watch for changes">
+    To have changes you make automatically trigger a rebuild, run:
+
+    ```bash
+    npm run watch
+    ```
+
+    This first builds the packs, then starts `vite build --watch` in development mode. Source maps are emitted in development mode, and the output is not minified, making browser debugging practical.
+  </Step>
+</Steps>
+
+## Hot Module Replacement
+
+For a faster development loop with live updates in the browser, use the `hot` command instead of `watch`:
+
+```bash
+npm run hot
+```
+
+This starts the Vite dev server (`build/hmr.ts` calls `npx vite serve`). The server proxies all requests to Foundry running on `http://localhost:30000` (configurable via `foundryconfig.json`) while serving the compiled system assets from port `30001`. CSS changes, Svelte components, Handlebars templates, and localization JSON are all hot-reloaded without a full page refresh.
+
+You can customize the ports by creating a `foundryconfig.json` in the repository root:
+
+```json
+{
+    "foundryPort": 30000,
+    "port": 30001
+}
+```
+
+## Source Directory Structure
+
+All TypeScript source lives under `src/`:
+
+```
+src/
+├── global.ts          # Global type declarations and augmentations
+├── pf2e.ts            # System entry point — imports and initialises everything
+├── module/            # Core system code
+│   ├── actor/         # Actor documents and data models
+│   ├── item/          # Item documents and data models
+│   ├── rules/         # Rule element implementations
+│   ├── system/        # System-level utilities and data
+│   ├── canvas/        # Canvas layer overrides
+│   ├── apps/          # Application windows and UI
+│   └── ...            # Other subsystems (encounter, migration, etc.)
+├── scripts/           # Hooks, config registration, macros, UI
+│   ├── config/        # System configuration objects
+│   ├── hooks/         # Foundry hook registrations
+│   ├── macros/        # Built-in macro implementations
+│   └── ...            # Sheet registration, fonts, keybindings
+├── styles/            # SCSS stylesheets (compiled by Vite/sass)
+└── util/              # Shared utility functions
+    ├── index.ts       # Re-exports all utilities
+    ├── misc.ts        # Miscellaneous helpers (sluggify, etc.)
+    ├── dom.ts         # DOM helpers
+    ├── uuid.ts        # UUID utilities
+    └── ...            # Additional utilities
+```
+
+Path aliases defined in `tsconfig.json` let you import from these directories without relative paths:
+
+| Alias | Resolves to |
+|---|---|
+| `@actor` | `src/module/actor/index.ts` |
+| `@item` | `src/module/item/index.ts` |
+| `@scene` | `src/module/scene/index.ts` |
+| `@system/*` | `src/module/system/*` |
+| `@module/*` | `src/module/*` |
+| `@scripts/*` | `src/scripts/*` |
+| `@util` | `src/util/index.ts` |
+| `@client/*` | `types/foundry/client/*` |
+| `@common/*` | `types/foundry/common/*` |
+
+## Compendium Packs
+
+Compendium content lives in the `packs/` directory as JSON files. Do not edit these JSON files directly. Instead:
+
+1. Edit the compendium items in your running Foundry world.
+2. Export your changes back to source by running:
+
+```bash
+pnpm run extractPacks <compendium-db-filename> --system=pf2e
+```
+
+Replace `<compendium-db-filename>` with the name of the specific compendium database you modified (for example, `spells`). This converts the Foundry database format back into the version-controlled JSON files in `packs/`.

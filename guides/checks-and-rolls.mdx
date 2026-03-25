@@ -1,0 +1,311 @@
+---
+title: "Checks and Rolls"
+description: "How the PF2e check system works, from degree of success through modifiers and programmatic roll APIs."
+---
+
+Every time a character attempts something uncertain in Pathfinder 2e, the system resolves it with a **check**: roll a d20, add a total modifier, compare the result against a Difficulty Class (DC), and determine a degree of success. This page explains how the system implements those steps, and how you can trigger checks programmatically.
+
+## Degree of Success
+
+PF2e has four degrees of success rather than the simple pass/fail of other systems. The `DegreeOfSuccess` class (defined in `src/module/system/degree-of-success.ts`) encapsulates all of this logic.
+
+```typescript
+// Numeric constants on the class itself
+DegreeOfSuccess.CRITICAL_FAILURE = 0;
+DegreeOfSuccess.FAILURE          = 1;
+DegreeOfSuccess.SUCCESS          = 2;
+DegreeOfSuccess.CRITICAL_SUCCESS = 3;
+
+// Also available as a plain object
+const DEGREE_OF_SUCCESS = {
+  CRITICAL_SUCCESS: 3,
+  SUCCESS:          2,
+  FAILURE:          1,
+  CRITICAL_FAILURE: 0,
+} as const;
+
+// String forms used in predicates and roll flags
+const DEGREE_OF_SUCCESS_STRINGS = [
+  "criticalFailure",
+  "failure",
+  "success",
+  "criticalSuccess",
+] as const;
+```
+
+### Calculation Rules
+
+The system follows the published Pathfinder 2e rules exactly:
+
+<Steps>
+  <Step title="Roll and compare">
+    Compare `rollTotal` (d20 + all modifiers) against the DC:
+    - `rollTotal - dc >= 10` → critical success
+    - `rollTotal - dc >= 0` → success
+    - `dc - rollTotal >= 10` → critical failure
+    - Otherwise → failure
+  </Step>
+  <Step title="Apply natural 1 / natural 20">
+    A natural 20 improves the result by one degree; a natural 1 worsens it by one degree. This is applied on top of the margin calculation.
+  </Step>
+  <Step title="Apply degree-of-success adjustments">
+    Rule elements and abilities can shift a specific degree up or down by using a `DegreeAdjustmentsRecord`. Adjustments are collected from synthetics and applied after the die adjustment.
+  </Step>
+</Steps>
+
+```typescript
+// DegreeAdjustmentAmount values
+const DEGREE_ADJUSTMENT_AMOUNTS = {
+  LOWER_BY_TWO:        -2,
+  LOWER:               -1,
+  INCREASE:             1,
+  INCREASE_BY_TWO:      2,
+  TO_CRITICAL_FAILURE: "criticalFailure",
+  TO_FAILURE:          "failure",
+  TO_SUCCESS:          "success",
+  TO_CRITICAL_SUCCESS: "criticalSuccess",
+} as const;
+```
+
+### CheckDC Interface
+
+```typescript
+interface CheckDC {
+  slug?:      string | null;
+  statistic?: StatisticDifficultyClass | null;
+  label?:     string;
+  scope?:     "attack" | "check";
+  value:      number;
+  visible?:   boolean;
+}
+```
+
+Set `visible: true` to show the DC value in the chat card even when the metagame *Show DCs* setting is off.
+
+---
+
+## StatisticPF2e: The Unified Statistic System
+
+Every rollable value in the system — skills, saving throws, attack rolls, Perception, spell DCs — is represented by a `Statistic` instance (defined in `src/module/system/statistic/statistic.ts`).
+
+A `Statistic` wraps:
+- A slug identifier (e.g., `"stealth"`, `"reflex"`, `"spell-attack"`).
+- An optional ability attribute (`"dex"`, `"wis"`, etc.).
+- An optional proficiency rank (0–4).
+- A stack of `Modifier` objects.
+- A `StatisticCheck` sub-object for making rolls.
+- A `StatisticDifficultyClass` sub-object for acting as a DC target.
+
+```typescript
+// How a character's Stealth statistic is built:
+const stealth = new Statistic(actor, {
+  slug:    "stealth",
+  label:   "PF2E.SkillStealth",
+  attribute: "dex",
+  rank:    actor.skills.stealth.rank,
+  domains: ["stealth", "skill-check", "dexterity-based"],
+  check: { type: "skill-check" },
+  dc:    {},
+});
+```
+
+You can access any actor's statistics through `actor.skills`, `actor.saves`, `actor.perception`, or by calling `actor.getStatistic(slug)`.
+
+---
+
+## How a Check Roll Executes
+
+The static `Check.roll` method in `src/module/system/check/check.ts` is the single entry point for all d20 checks.
+
+```typescript
+class Check {
+  static async roll(
+    check:    CheckModifier,
+    context:  CheckCheckContext = {},
+    event:    Event | null = null,
+    callback?: CheckRollCallback,
+  ): Promise<Rolled<CheckRoll> | null>
+}
+```
+
+### CheckCheckContext
+
+`CheckCheckContext` (in `src/module/system/check/types.ts`) controls every aspect of the roll:
+
+```typescript
+interface CheckCheckContext {
+  type?:           CheckType;      // "skill-check" | "saving-throw" | "attack-roll" | ...
+  actor?:          ActorPF2e;
+  token?:          TokenDocumentPF2e | null;
+  item?:           ItemPF2e | null;
+  dc?:             CheckDC | null;
+  options?:        Set<string>;    // roll options (see below)
+  domains?:        string[];
+  rollTwice?:      "keep-higher" | "keep-lower" | false;
+  skipDialog?:     boolean;
+  isReroll?:       boolean;
+  dosAdjustments?: DegreeOfSuccessAdjustment[];
+  mapIncreases?:   0 | 1 | 2;     // Multiple Attack Penalty steps
+  title?:          string;
+  damaging?:       boolean;
+}
+```
+
+### Check Types
+
+```typescript
+type CheckType =
+  | "attack-roll"
+  | "check"
+  | "counteract-check"
+  | "flat-check"
+  | "initiative"
+  | "perception-check"
+  | "saving-throw"
+  | "skill-check";
+```
+
+### CheckRoll
+
+`CheckRoll` (in `src/module/system/check/roll.ts`) is a `Roll` subclass that carries PF2e-specific metadata:
+
+```typescript
+class CheckRoll extends Roll {
+  get type(): CheckType          // "skill-check", "attack-roll", etc.
+  get degreeOfSuccess(): DegreeOfSuccessIndex | null  // 0–3
+  get isReroll(): boolean
+  get isRerollable(): boolean    // false for fortune/misfortune rolls
+  get roller(): UserPF2e | null  // who rolled
+}
+```
+
+The formula is always `{dice}{totalModifier}` — for example `1d20+12` — where `dice` is `"1d20"`, `"2d20kh"` (fortune), or `"2d20kl"` (misfortune).
+
+---
+
+## Modifiers
+
+The `Modifier` class in `src/module/actor/modifiers.ts` represents any discrete numeric contribution to a statistic or check.
+
+### Modifier Types
+
+```typescript
+const MODIFIER_TYPES = new Set([
+  "ability",
+  "circumstance",
+  "item",
+  "potency",
+  "proficiency",
+  "status",
+  "untyped",
+] as const);
+```
+
+**Stacking rules** (from the Pathfinder 2e Core Rulebook):
+- `circumstance`, `item`, and `status` modifiers: only the highest bonus and the lowest penalty of each type apply.
+- `untyped` modifiers: all stack.
+- `ability` and `proficiency`: one of each per statistic.
+- `potency`: the highest potency rune bonus applies.
+
+### Modifier Properties
+
+```typescript
+class Modifier {
+  slug:          string;         // machine-readable identifier
+  label:         string;         // display name
+  modifier:      number;         // signed value (+3, -2, etc.)
+  type:          ModifierType;
+  enabled:       boolean;        // false = suppressed by stacking rules
+  ignored:       boolean;        // manually excluded
+  predicate:     Predicate;      // conditions under which this applies
+  critical:      boolean | null; // null = always, true = crit only
+  damageType:    DamageType | null;
+  kind:          "bonus" | "penalty" | "modifier";
+  source:        string | null;
+}
+```
+
+<Note>
+  A `kind` of `"modifier"` is neutral (neither bonus nor penalty). Bonuses are positive values, penalties are negative. The stacking rules are applied separately per kind.
+</Note>
+
+---
+
+## Roll Options
+
+Roll options are a `Set<string>` of boolean flags that flow through the entire check pipeline. Every modifier, roll note, and degree-of-success adjustment has a `predicate` that tests against this set.
+
+Options are collected from many sources:
+- The actor's current state (`"self:type:character"`, `"self:condition:prone"`, etc.)
+- The check domain (`"skill-check"`, `"stealth"`, `"dexterity-based"`)
+- The item used (`"item:slug:longsword"`, `"item:trait:agile"`)
+- The target (`"target:condition:off-guard"`, `"target:level:5"`)
+- Dynamic values (`"map:increases:1"`, `"check:reroll"`)
+
+```typescript
+// Options are a Set — macros and modules may pass an array, which
+// Check.roll() automatically converts.
+context.options = new Set([
+  "action:strike",
+  "self:condition:prone",
+  "target:condition:off-guard",
+]);
+```
+
+Domains group options for modifier lookup. For example, a stealth check uses the domains `["stealth", "skill-check", "dexterity-based", "all"]`, so all modifiers that live in any of those domains are considered.
+
+---
+
+## Programmatic Check Example
+
+The following macro triggers a Stealth skill check against DC 20 for the selected token's actor:
+
+```typescript
+// Get the selected token's actor
+const actor = canvas.tokens.controlled[0]?.actor;
+if (!actor) {
+  ui.notifications.warn("Select a token first.");
+  return;
+}
+
+// Retrieve the Stealth statistic
+const stealth = actor.skills["stealth"];
+if (!stealth) {
+  ui.notifications.warn("Actor has no Stealth skill.");
+  return;
+}
+
+// Build a check modifier from the statistic
+const check = stealth.check;
+
+// Roll against DC 20, creating a chat message
+const roll = await check.roll({
+  dc: { value: 20 },
+  // Add an extra circumstance penalty for being in bright light (example)
+  extraModifiers: [
+    new game.pf2e.Modifier({
+      label: "Bright Light Penalty",
+      modifier: -2,
+      type: "circumstance",
+    }),
+  ],
+});
+
+console.log("Degree of success:", roll?.degreeOfSuccess);
+// 0 = critical failure, 1 = failure, 2 = success, 3 = critical success
+```
+
+---
+
+## Roll Inspector
+
+The **Roll Inspector** (found at `src/module/apps/roll-inspector/`) is a developer tool that lets you examine exactly which modifiers contributed to any given roll. Open it by clicking the roll total in a check chat card while holding a modifier key, or via the button exposed when `game.pf2e.settings.metagame.breakdowns` is `true`.
+
+The inspector shows:
+- Every modifier in the stack, its type, and whether it was enabled or suppressed.
+- Which roll options were active at the time of the roll.
+- The domains that were searched for modifiers.
+
+<Tip>
+  Enable **Show Modifier Breakdown** in the Metagame Settings to make the breakdown permanently visible on all rolls for GM and player-owned actors.
+</Tip>

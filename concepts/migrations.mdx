@@ -1,0 +1,226 @@
+---
+title: "Data Migrations"
+description: "When the PF2e system's data schema changes between versions, migrations automatically update stored actor and item documents to match the new structure."
+---
+
+Every time the PF2e system changes how data is stored — renaming a field, restructuring an object, removing a deprecated property — a **migration** is required. Without migrations, actors and items created under an older version would have stale data structures that newer system code cannot correctly read.
+
+Migrations run automatically when you load a world whose schema version is behind the current system version. The migration runner handles actors, items, tokens, scenes, journal entries, macros, roll tables, and users.
+
+## Schema Versioning
+
+The system tracks its data schema with a monotonically increasing float version number stored in `system.json`. The `MigrationRunnerBase` class defines the version boundaries:
+
+```typescript
+// src/module/migration/runner/base.ts
+export class MigrationRunnerBase {
+    static LATEST_SCHEMA_VERSION = 0.955;
+    static MINIMUM_SAFE_VERSION   = 0.7;
+    static RECOMMENDED_SAFE_VERSION = 0.84;
+
+    /** Minimum schema version required per Foundry generation */
+    static FOUNDRY_SCHEMA_VERSIONS = {
+        0.8: 0.634,
+        9:   0.7,
+        10:  0.781,
+        11:  0.841,
+        12:  0.927,
+        13:  0.936,
+    };
+}
+```
+
+Each world stores its current schema version in a game setting (`worldSchemaVersion`). On load, `MigrationRunner#needsMigration()` compares this against `LATEST_SCHEMA_VERSION` and, if behind, triggers the migration pipeline.
+
+## MigrationBase
+
+Every individual migration is a class that extends `MigrationBase`. You only implement the update methods relevant to your change:
+
+```typescript
+// src/module/migration/base.ts
+abstract class MigrationBase {
+    /** Must match the new schema version number in system.json */
+    static readonly version: number;
+    readonly version: number;
+
+    /**
+     * Set to true if this migration adds items to actors. The runner will flush
+     * to the Foundry backend before running subsequent migrations, ensuring
+     * newly created items have IDs that later migrations can reference.
+     */
+    requiresFlush = false;
+
+    /** Update a single actor document */
+    updateActor?(source: ActorSourcePF2e): Promise<void>;
+
+    /** Update a single item document, with optional actor context */
+    updateItem?(source: ItemSourcePF2e, actorSource?: ActorSourcePF2e): Promise<void>;
+
+    /**
+     * Pre-pass item update — runs before updateActor/updateItem.
+     * Use when an item change must be complete before the actor-level pass.
+     */
+    preUpdateItem?(source: ItemSourcePF2e, actorSource?: ActorSourcePF2e): Promise<void>;
+
+    /** Update a journal entry document */
+    updateJournalEntry?(source: foundry.documents.JournalEntrySource): Promise<void>;
+
+    /** Update a macro document */
+    updateMacro?(source: foundry.documents.MacroSource): Promise<void>;
+
+    /** Update a roll table document */
+    updateTable?(source: foundry.documents.RollTableSource): Promise<void>;
+
+    /** Update a token document */
+    updateToken?(
+        tokenData: foundry.documents.TokenSource,
+        actor: Readonly<ActorPF2e | null>,
+        scene: Readonly<ScenePF2e | null>,
+    ): Promise<void>;
+
+    /** Update a user document */
+    updateUser?(userData: foundry.documents.UserSource): Promise<void>;
+
+    /** Perform arbitrary migration steps not tied to a specific document type */
+    migrate?(): Promise<void>;
+}
+```
+
+## Writing a Migration
+
+Here is a real migration from the codebase — migration `0.700` (`700-single-class-features.ts`), which consolidated class features that had been duplicated at multiple levels into single items:
+
+```typescript
+import { MigrationBase } from "../base.ts";
+
+export class Migration700SingleClassFeatures extends MigrationBase {
+    static override version = 0.7;
+
+    override async updateItem(source: ItemSourcePF2e): Promise<void> {
+        if (source.type === "class") {
+            this.#migrateClass(source);
+        } else if (source.type === "feat") {
+            this.#migrateFeature(source);
+        }
+    }
+
+    #migrateClass(itemSource: ClassSource): void {
+        // Update feature entry references to point to the canonical item ID
+        for (const refId in itemSource.system.items) {
+            const itemRef = itemSource.system.items[refId];
+            itemRef.level = Number(itemRef.level) || 1;
+            for (const feature of this.features) {
+                if (this.itemIds[feature.slug].includes(itemRef.id ?? "")) {
+                    itemRef.id = this.itemIds[feature.slug][0];
+                    itemRef.name = feature.name;
+                }
+            }
+        }
+    }
+}
+```
+
+<Steps>
+  <Step title="Bump the schema version">
+    Increment `schema` in `system.json`. Use the next integer after the current latest (e.g., if the latest migration is `0.955`, your new migration is `0.956`).
+  </Step>
+  <Step title="Create the migration file">
+    Add a new file to `src/module/migration/migrations/` following the naming convention `<version>-<description>.ts`, for example `956-rename-my-field.ts`.
+
+    ```typescript
+    import { ItemSourcePF2e } from "@item/base/data/index.ts";
+    import { MigrationBase } from "../base.ts";
+
+    export class Migration956RenameMyField extends MigrationBase {
+        static override version = 0.956;
+
+        override async updateItem(source: ItemSourcePF2e): Promise<void> {
+            if (source.type === "feat") {
+                const system = source.system as Record<string, unknown>;
+                if ("oldFieldName" in system) {
+                    system.newFieldName = system.oldFieldName;
+                    delete system.oldFieldName;
+                }
+            }
+        }
+    }
+    ```
+  </Step>
+  <Step title="Register the migration">
+    Export the class from `src/module/migration/migrations/index.ts`. The `MigrationList` class in `src/module/migration/index.ts` automatically discovers all exports from that index.
+  </Step>
+  <Step title="Test your migration">
+    Run the unit test suite:
+
+    ```bash
+    npm test -- --grep migration
+    ```
+
+    And run the migration against your compendium sources:
+
+    ```bash
+    npm run migrate
+    ```
+
+    The `migrate` script (`tsx ./build/run-migration.ts`) applies all pending migrations to the YAML source files in `packs/pf2e/` so that compendium content stays current.
+  </Step>
+</Steps>
+
+## MigrationRunner
+
+The `MigrationRunner` class (extending `MigrationRunnerBase`) orchestrates the full world migration on game load:
+
+1. **Collects pending migrations** — filters `MigrationList` to only those with `version > worldSchemaVersion`.
+2. **Phases migrations** — groups them into sequential batches, flushing to the backend between batches when any migration has `requiresFlush = true`.
+3. **Migrates documents** in this order:
+   - World actors (familiars go last to follow their masters)
+   - World items
+   - Journal entries
+   - Macros
+   - Roll tables
+   - Users
+   - Scene tokens and synthetic (unlinked) actors
+4. **Updates the world schema version** setting to `LATEST_SCHEMA_VERSION` when complete.
+
+```typescript
+// Simplified flow inside MigrationRunner#runMigration()
+const migrationsToRun = this.migrations.filter(
+    (m) => worldSchemaVersion < m.version
+);
+
+// Split into phases at requiresFlush boundaries
+const phases = buildPhases(migrationsToRun);
+
+for (const phase of phases) {
+    await this.runMigrations(phase); // actors → items → journals → ...
+}
+
+await game.settings.set(SYSTEM_ID, "worldSchemaVersion", LATEST_SCHEMA_VERSION);
+```
+
+## Compendium Migrations
+
+In addition to world documents, the `npm run migrate` script migrates the YAML source files that compile into the system's compendium packs. Run this after adding a new migration to ensure the pack sources are up-to-date before committing:
+
+```bash
+npm run migrate
+```
+
+You can also trigger a compendium migration programmatically for an open pack in Foundry:
+
+```typescript
+const pack = game.packs.get("pf2e.feats");
+await migrationRunner.runCompendiumMigration(pack);
+```
+
+<Warning>
+  Migrations modify stored data in place. The runner uses `diffObject` to only write changed fields, but always back up your world before running a forced migration (`MigrationRunner#runMigration(force: true)`).
+</Warning>
+
+## Migration Version History
+
+The current schema version is `0.955` (as of `MigrationRunnerBase.LATEST_SCHEMA_VERSION`). The migration history stretches back to schema `0.700`, with one or more migrations per minor system release. You can browse the full history in [`src/module/migration/migrations/`](https://github.com/foundryvtt/pf2e/tree/master/src/module/migration/migrations).
+
+<Info>
+  Worlds created below `MINIMUM_SAFE_VERSION` (0.7) cannot be safely migrated to the current version. Worlds below `RECOMMENDED_SAFE_VERSION` (0.84) will display a warning suggesting users migrate to an intermediate version first.
+</Info>

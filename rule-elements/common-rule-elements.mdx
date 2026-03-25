@@ -1,0 +1,512 @@
+---
+title: "Common Rule Elements"
+description: "Reference for the most frequently used Rule Elements in the PF2e system, with JSON examples and field documentation."
+keywords: ["rule elements", "FlatModifier", "AELike", "DamageDice", "RollOption", "GrantItem", "ChoiceSet", "RollNote"]
+---
+
+This page documents the rule elements you will encounter most often when reading or writing PF2e item data. Each entry includes the rule element's purpose, a working JSON example, and the key fields you can configure.
+
+## FlatModifier
+
+Adds a flat numeric bonus or penalty to a statistic. This is the most common rule element in the system — feats, spells, and equipment all use it to grant bonuses to skills, saves, attacks, and more.
+
+**Source:** `src/module/rules/rule-element/flat-modifier.ts`
+
+```json
+{
+  "key": "FlatModifier",
+  "selector": "perception",
+  "type": "circumstance",
+  "value": 2,
+  "label": "Alert",
+  "predicate": ["action:seek"]
+}
+```
+
+<AccordionGroup>
+  <Accordion title="FlatModifier fields">
+    <ParamField path="selector" type="string | string[]" required>
+      The statistic slug(s) to add the modifier to. Common selectors: `perception`, `athletics`, `ac`, `saving-throw:will`, `attack-roll`, `spell-attack-roll`, `damage`, `strike-damage`. You can also supply an array to apply the modifier to multiple selectors at once.
+    </ParamField>
+
+    <ParamField path="type" type="string" required>
+      The modifier type. Bonuses of the same type don't stack; only the highest applies.
+
+      | Value | Meaning |
+      |---|---|
+      | `"untyped"` | Always stacks with everything |
+      | `"item"` | Item bonus (e.g. from magic items) |
+      | `"circumstance"` | Situational bonus |
+      | `"status"` | Condition-based bonus |
+      | `"ability"` | Ability modifier (requires `ability` field) |
+      | `"potency"` | Weapon/armor potency rune |
+    </ParamField>
+
+    <ParamField path="value" type="number | string">
+      The modifier value. Can be a literal number or a Foundry roll formula referencing actor data, e.g. `"@actor.abilities.str.mod"` or `"floor(@actor.level / 2)"`. Required unless `type` is `"ability"`.
+    </ParamField>
+
+    <ParamField path="ability" type="string">
+      Required when `type` is `"ability"`. One of: `str`, `dex`, `con`, `int`, `wis`, `cha`. The value is automatically set to the corresponding ability modifier.
+    </ParamField>
+
+    <ParamField path="min" type="number">
+      Clamps the resolved value to at least this number.
+    </ParamField>
+
+    <ParamField path="max" type="number">
+      Clamps the resolved value to at most this number.
+    </ParamField>
+
+    <ParamField path="damageType" type="string">
+      When applied to a damage selector, restricts the bonus to this damage type only (e.g. `"fire"`, `"slashing"`).
+    </ParamField>
+
+    <ParamField path="damageCategory" type="string">
+      Restricts the bonus to a damage category: `"persistent"`, `"precision"`, or `"splash"`.
+    </ParamField>
+
+    <ParamField path="critical" type="boolean | null">
+      Controls how this modifier interacts with critical hits on damage rolls. `null` (default): doubled on critical. `true`: only on criticals, not doubled. `false`: applies to both normal and critical, not doubled.
+    </ParamField>
+
+    <ParamField path="force" type="boolean" default="false">
+      When `true`, applies this modifier even if it is not the highest of its type. Use sparingly.
+    </ParamField>
+
+    <ParamField path="hideIfDisabled" type="boolean" default="false">
+      When `true`, hides this modifier from the breakdown tooltip if its predicate is not currently passing.
+    </ParamField>
+
+    <ParamField path="removeAfterRoll" type='boolean | "if-enabled" | PredicateStatement[]' default="false">
+      Only valid on `effect` items. `true` deletes the parent item after any roll. `"if-enabled"` deletes it only if this modifier was active. A predicate array deletes it if the predicate passes against the roll options.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## AELike
+
+Directly reads and writes actor data properties, similar to Foundry's built-in `ActiveEffect`. Use this when you need to set, add to, or multiply a specific value on the actor's data model — for example, increasing maximum HP, overriding a movement type, or setting a flag.
+
+**Source:** `src/module/rules/rule-element/ae-like.ts`
+
+```json
+{
+  "key": "AELike",
+  "mode": "add",
+  "path": "system.attributes.hp.max",
+  "value": 10
+}
+```
+
+<AccordionGroup>
+  <Accordion title="AELike fields">
+    <ParamField path="path" type="string" required>
+      The dot-separated path on the actor object to modify. Must not start with `data.` (use `system.` instead). The path must resolve to an existing property.
+    </ParamField>
+
+    <ParamField path="mode" type="string" required>
+      How the `value` is applied to the current property value.
+
+      | Mode | Priority | Description |
+      |---|---|---|
+      | `"multiply"` | 10 | `Math.trunc(current * value)` |
+      | `"add"` | 20 | `current + value` (also appends to arrays) |
+      | `"subtract"` | 20 | `current - value` (also removes from arrays) |
+      | `"remove"` | 20 | Alias for `subtract` |
+      | `"downgrade"` | 30 | `Math.min(current, value)` |
+      | `"upgrade"` | 40 | `Math.max(current, value)` |
+      | `"override"` | 50 | Replaces the current value entirely |
+    </ParamField>
+
+    <ParamField path="value" type="number | string | boolean | object" required>
+      The change value. The type must be compatible with the `mode` and the current data type at `path`. Formulas like `"@actor.level"` are supported.
+    </ParamField>
+
+    <ParamField path="phase" type="string" default="applyAEs">
+      When to apply the modification. Options: `"applyAEs"` (during Foundry's AE phase), `"beforeDerived"` (early in derived data prep), `"afterDerived"` (after all preparation), `"beforeRoll"` (just before a check).
+    </ParamField>
+
+    <ParamField path="merge" type="boolean" default="false">
+      When `true` with `mode: "override"` and an object value, deep-merges the object rather than replacing it.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  AELike writes directly to the actor's in-memory data on every actor update. Paths that do not exist on the actor will cause a validation failure and disable the rule element.
+</Warning>
+
+---
+
+## DamageDice
+
+Adds extra damage dice to an attack or spell. Use this to implement abilities like sneak attack, deadly strikes, or elemental infusions.
+
+**Source:** `src/module/rules/rule-element/damage-dice.ts`
+
+```json
+{
+  "key": "DamageDice",
+  "selector": "strike-damage",
+  "diceNumber": 1,
+  "dieSize": "d6",
+  "damageType": "fire",
+  "predicate": ["item:trait:agile"]
+}
+```
+
+<AccordionGroup>
+  <Accordion title="DamageDice fields">
+    <ParamField path="selector" type="string | string[]" required>
+      The damage selector(s) to add dice to. Common values: `"strike-damage"`, `"spell-damage"`, a specific weapon or ability slug.
+    </ParamField>
+
+    <ParamField path="diceNumber" type="number | string" default="null">
+      How many dice to add. Accepts a number or a formula. `null` means no additional dice (useful when using `override` only).
+    </ParamField>
+
+    <ParamField path="dieSize" type="string" default="null">
+      The die size: `"d4"`, `"d6"`, `"d8"`, `"d10"`, or `"d12"`. If `null`, uses the weapon's base die size.
+    </ParamField>
+
+    <ParamField path="damageType" type="string" default="null">
+      The damage type for the added dice (e.g. `"fire"`, `"piercing"`). If `null`, inherits the base damage type.
+    </ParamField>
+
+    <ParamField path="category" type="string" default="null">
+      Damage category: `"persistent"`, `"precision"`, or `"splash"`. Leave `null` for regular damage.
+    </ParamField>
+
+    <ParamField path="critical" type="boolean | null" default="null">
+      `null`: dice apply to both normal and critical hits, doubled on critical. `true`: only on criticals. `false`: on both, but never doubled.
+    </ParamField>
+
+    <ParamField path="override" type="object">
+      An object that overrides properties of the base damage roll. Supported keys: `upgrade` (boolean), `downgrade` (boolean), `diceNumber` (integer 0–10), `dieSize` (d6–d12), `damageType` (string).
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## RollOption
+
+Sets a boolean flag (a *roll option*) in a named domain. Roll options are the strings that predicates test against. Use this to expose a condition, stance, or mode that other rule elements (and roll tables) can check.
+
+**Source:** `src/module/rules/rule-element/roll-option/rule-element.ts`
+
+```json
+{
+  "key": "RollOption",
+  "domain": "all",
+  "option": "rage",
+  "value": true
+}
+```
+
+<AccordionGroup>
+  <Accordion title="RollOption fields">
+    <ParamField path="domain" type="string" default="all">
+      The roll domain in which to register this option. `"all"` means the option is always present. Other common domains: `"attack-roll"`, `"damage"`, `"saving-throw"`, `"skill-check"`. Options in a domain are only active when a roll of that domain is being made.
+    </ParamField>
+
+    <ParamField path="option" type="string" required>
+      The option string to set. Can include `{item|...}` or `{actor|...}` injection. Conventionally kebab-case, e.g. `"furious-focus"` or `"stance:animal-instinct"`. Also supports a suboptions configuration.
+    </ParamField>
+
+    <ParamField path="value" type="boolean | string" default="true">
+      The value to assign. `true` sets the option; `false` clears it. A string is used when the option is conditional. Omit when `toggleable` is set.
+    </ParamField>
+
+    <ParamField path="toggleable" type='boolean | "totm"'>
+      When `true`, creates a toggle button visible in the actor sheet that allows the player to enable or disable the option manually. `"totm"` shows the toggle only when the Theatre of the Mind setting is on.
+    </ParamField>
+
+    <ParamField path="disabledIf" type="PredicateStatement[]">
+      A predicate that, when passing, disables a toggleable option. For example, disabling a stance if the actor is wearing heavy armor.
+    </ParamField>
+
+    <ParamField path="disabledValue" type="boolean">
+      The value to use for the option when `disabledIf` passes. Defaults to `false`.
+    </ParamField>
+
+    <ParamField path="suboptions" type="Suboption[] | object">
+      A list of mutually-exclusive sub-options rendered as a dropdown alongside the toggle button. Each suboption has `label` and `value` fields.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## GrantItem
+
+Automatically grants another item (feat, ability, equipment, etc.) to the actor when the parent item is added. The granted item behaves as a normal actor item and can itself carry rule elements.
+
+**Source:** `src/module/rules/rule-element/grant-item/rule-element.ts`
+
+```json
+{
+  "key": "GrantItem",
+  "uuid": "Compendium.pf2e.feats-srd.Item.RxUFMHFXVBPsxUaQ",
+  "flag": "dedicationFeat",
+  "onDeleteActions": {
+    "granter": "cascade",
+    "grantee": "restrict"
+  }
+}
+```
+
+<AccordionGroup>
+  <Accordion title="GrantItem fields">
+    <ParamField path="uuid" type="string" required>
+      The UUID of the compendium or world item to grant. Must be a non-embedded item UUID.
+    </ParamField>
+
+    <ParamField path="flag" type="string">
+      A dromedaryCase identifier used to look up the granted item on the parent item's flags and to coordinate with `ChoiceSet` rule elements via `preselectChoices`. If `track` is true, `flag` is required.
+    </ParamField>
+
+    <ParamField path="onDeleteActions" type="object">
+      Controls what happens when either item is deleted.
+
+      | Key | Applies when... | Values |
+      |---|---|---|
+      | `granter` | The granting item is deleted | `"cascade"` (also delete grantee), `"detach"` (leave grantee), `"restrict"` (block deletion) |
+      | `grantee` | The granted item is deleted | Same as above |
+    </ParamField>
+
+    <ParamField path="allowDuplicate" type="boolean" default="true">
+      When `false`, the item is not granted if the actor already has an item with the same source UUID.
+    </ParamField>
+
+    <ParamField path="reevaluateOnUpdate" type="boolean" default="false">
+      Re-runs this grant on every actor update, adding or removing the granted item based on the current predicate result. Requires a non-empty `predicate`.
+    </ParamField>
+
+    <ParamField path="inMemoryOnly" type="boolean" default="false">
+      Grants a temporary in-memory item (not stored to the database). Useful for conditions that need their own rule elements.
+    </ParamField>
+
+    <ParamField path="nestUnderGranter" type="boolean">
+      When `true`, nests the granted item visually under the granting item in the inventory.
+    </ParamField>
+
+    <ParamField path="preselectChoices" type="Record<string, string | number>">
+      Pre-fills `ChoiceSet` selections on the granted item. The keys are the `flag` names of the `ChoiceSet` rule elements on the granted item.
+    </ParamField>
+
+    <ParamField path="alterations" type="ItemAlteration[]">
+      A list of alterations to apply to the granted item before it is created, allowing you to change its data.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  `GrantItem` is only valid on non-physical items (feats, class features, abilities, spells). Physical items cannot grant other items.
+</Note>
+
+---
+
+## ChoiceSet
+
+Presents a choice prompt to the user and stores their selection. The selection is saved to the item's flags and can be referenced by other rule elements on the same item using `{item|flags.pf2e.rulesSelections.<flag>}`. It can also automatically set a roll option.
+
+**Source:** `src/module/rules/rule-element/choice-set/rule-element.ts`
+
+```json
+{
+  "key": "ChoiceSet",
+  "prompt": "PF2E.SpecificRule.Prompt.Skill",
+  "choices": [
+    { "label": "Athletics", "value": "athletics" },
+    { "label": "Acrobatics", "value": "acrobatics" }
+  ],
+  "rollOption": "selected-skill"
+}
+```
+
+To query owned items instead of a static list:
+
+```json
+{
+  "key": "ChoiceSet",
+  "prompt": "PF2E.SpecificRule.Prompt.WeaponType",
+  "choices": {
+    "ownedItems": true,
+    "itemType": "weapon",
+    "predicate": ["item:category:martial"]
+  }
+}
+```
+
+<AccordionGroup>
+  <Accordion title="ChoiceSet fields">
+    <ParamField path="choices" type="ChoiceSetItem[] | ChoiceSetConfig" required>
+      The options to present. Either a static array of `{ label, value }` objects, or a configuration object for dynamic sources:
+
+      - `{ "ownedItems": true, "itemType": "weapon" }` — owned items of a type
+      - `{ "filter": [...] }` — compendium query with filter statements
+      - `{ "config": "<config-key>" }` — a system-defined choices configuration
+    </ParamField>
+
+    <ParamField path="prompt" type="string">
+      Localization key for the dialog's prompt text.
+    </ParamField>
+
+    <ParamField path="flag" type="string">
+      The key under `item.flags.pf2e.rulesSelections` where the selection is stored. Defaults to a sluggified version of the `label`. Referenced as `{item|flags.pf2e.rulesSelections.<flag>}` in other rule elements on this item.
+    </ParamField>
+
+    <ParamField path="rollOption" type="string">
+      When provided, sets a roll option of this name with the selected value. Equivalent to having a `RollOption` rule element whose option is `"<rollOption>:<selection>"`.
+    </ParamField>
+
+    <ParamField path="allowedDrops" type="object">
+      Restricts what items the user can drag-and-drop into the choice dialog.
+    </ParamField>
+
+    <ParamField path="allowNoSelection" type="boolean" default="false">
+      When `true`, the item's other rule elements are not disabled while no selection has been made.
+    </ParamField>
+
+    <ParamField path="actorFlag" type="boolean" default="false">
+      When `true`, the selection is also written to `actor.flags.pf2e.<flag>`.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+<Tip>
+  Use `ChoiceSet` alongside `GrantItem` to build multi-step feat chains: the `ChoiceSet` captures the selection, and `GrantItem` with `preselectChoices` passes it along to the granted item.
+</Tip>
+
+---
+
+## RollNote
+
+Adds a text note to the chat message whenever a matching roll is made. Use this to surface rules reminders, conditional effects, or flavor text.
+
+**Source:** `src/module/rules/rule-element/roll-note.ts`
+
+```json
+{
+  "key": "RollNote",
+  "selector": "attack-roll",
+  "text": "<b>{item|name}</b> treats a success on a flat check to remove persistent fire damage as a critical success.",
+  "predicate": ["self:condition:persistent-damage:fire"]
+}
+```
+
+<AccordionGroup>
+  <Accordion title="RollNote fields">
+    <ParamField path="selector" type="string | string[]" required>
+      The roll domain(s) that trigger this note. Accepts any roll selector, e.g. `"attack-roll"`, `"will"`, `"athletics"`, `"damage"`.
+    </ParamField>
+
+    <ParamField path="text" type="string (HTML)" required>
+      The note text displayed in chat. Accepts HTML and injected property expressions.
+    </ParamField>
+
+    <ParamField path="title" type="string | null" default="null">
+      An optional bolded title shown above the text in the chat card.
+    </ParamField>
+
+    <ParamField path="outcome" type="string[]" default="[]">
+      Restricts the note to specific roll outcomes. Values: `"criticalSuccess"`, `"success"`, `"failure"`, `"criticalFailure"`. An empty array shows the note regardless of outcome.
+    </ParamField>
+
+    <ParamField path="visibility" type="string | null" default="null">
+      Who can see the note in chat. `null` = everyone, `"gm"` = GM only, `"owner"` = item owner only.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Other rule elements
+
+<AccordionGroup>
+  <Accordion title="Strike — create a new attack option">
+    Creates a synthetic weapon and adds it as an attack option on the actor's sheet. Used by class features (e.g., monk's Flurry of Blows) and companion abilities.
+
+    ```json
+    {
+      "key": "Strike",
+      "label": "Fist",
+      "img": "systems/pf2e/icons/features/classes/powerful-fist.webp",
+      "category": "unarmed",
+      "damage": { "base": { "diceNumber": 1, "dieSize": "d4", "damageType": "bludgeoning" } },
+      "traits": ["agile", "finesse", "nonlethal", "unarmed"]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="IWR — immunity, weakness, and resistance">
+    Adds an immunity, weakness, or resistance to the actor.
+
+    ```json
+    {
+      "key": "IWR",
+      "type": "resistance",
+      "definition": ["fire"],
+      "value": 5
+    }
+    ```
+
+    Set `"type"` to `"immunity"`, `"weakness"`, or `"resistance"`. Use `"definition"` to specify the damage type(s) or exception(s).
+  </Accordion>
+
+  <Accordion title="BaseSpeed — movement speed">
+    Sets or modifies a movement speed on the actor.
+
+    ```json
+    {
+      "key": "BaseSpeed",
+      "selector": "land",
+      "value": 35
+    }
+    ```
+
+    `selector` values: `"land"`, `"fly"`, `"swim"`, `"burrow"`, `"climb"`. The `value` may be a number or formula.
+  </Accordion>
+
+  <Accordion title="Sense — grant or modify a sense">
+    Grants a sense (darkvision, low-light vision, tremorsense, etc.) or upgrades an existing one.
+
+    ```json
+    {
+      "key": "Sense",
+      "selector": "darkvision"
+    }
+    ```
+
+    Add `"force": true` to override any existing sense of the same type.
+  </Accordion>
+
+  <Accordion title="TempHP — grant temporary hit points">
+    Grants temporary hit points to the actor when the parent item is created.
+
+    ```json
+    {
+      "key": "TempHP",
+      "value": "@actor.level"
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="FastHealing — fast healing and regeneration">
+    Grants fast healing or regeneration to the actor.
+
+    ```json
+    {
+      "key": "FastHealing",
+      "type": "fast-healing",
+      "value": 5
+    }
+    ```
+
+    Set `"type"` to `"fast-healing"` or `"regeneration"`. Regeneration also accepts `"deactivatedBy"` with an array of damage types.
+  </Accordion>
+</AccordionGroup>

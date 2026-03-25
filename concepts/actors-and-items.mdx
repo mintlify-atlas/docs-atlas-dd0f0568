@@ -1,0 +1,180 @@
+---
+title: "Actors and Items"
+description: "Understand the two fundamental document types in PF2e for Foundry VTT: actors that represent entities in the world, and items that define their capabilities and possessions."
+---
+
+In Foundry VTT, every entity you interact with falls into one of two categories: **actors** and **items**. The PF2e system extends both of these base document types with a rich, type-safe class hierarchy covering everything from player characters to hazards, spells to shields.
+
+## Actors
+
+An actor represents any entity that exists in the game world and can be placed on a scene as a token. Actors own items, have statistics, and participate in encounters. The PF2e system defines eight distinct actor types, each backed by its own document class.
+
+<CardGroup cols={2}>
+  <Card title="character" icon="user">
+    **Player Characters** — The full PF2e character sheet. Tracks ancestry, class, background, ability scores, skills, spellcasting, exploration activities, and all advancement options.
+  </Card>
+  <Card title="npc" icon="skull">
+    **NPCs and Monsters** — Non-player characters and bestiary creatures. Uses a streamlined stat block sheet optimized for GM use during encounters.
+  </Card>
+  <Card title="familiar" icon="paw">
+    **Familiars** — Companions magically bonded to spellcasters. Derive many of their statistics from their master and support familiar-specific abilities.
+  </Card>
+  <Card title="hazard" icon="triangle-exclamation">
+    **Hazards** — Traps, environmental dangers, and complex hazards. Support disable checks, stealth DCs, and multi-round reset mechanics.
+  </Card>
+  <Card title="vehicle" icon="ship">
+    **Vehicles** — Ships, wagons, siege engines, and other conveyances. Track crew roles, pilot checks, and vehicle-specific damage.
+  </Card>
+  <Card title="party" icon="users">
+    **Party** — A group of characters traveling together. Aggregates party member data, tracks shared exploration activities, and displays world navigation information.
+  </Card>
+  <Card title="army" icon="chess-rook">
+    **Army** — Mass-combat armies for the Warfare subsystem. Tracks tactics, gear, and army-level statistics separate from individual creatures.
+  </Card>
+  <Card title="loot" icon="box-open">
+    **Loot** — Treasure containers and shop inventories. Provides a shared stash sheet that players can interact with to pick up or transfer items.
+  </Card>
+</CardGroup>
+
+These types map directly to the `ActorInstances` interface in [`src/module/actor/types.ts`](https://github.com/foundryvtt/pf2e/blob/master/src/module/actor/types.ts) and are resolved at runtime through `ActorPF2e#isOfType()`.
+
+```typescript
+// Checking actor type with full TypeScript narrowing
+if (actor.isOfType("character")) {
+  // actor is now CharacterPF2e — access character-specific properties
+  console.log(actor.level, actor.ancestry?.name);
+}
+
+if (actor.isOfType("npc", "hazard")) {
+  // actor is narrowed to NPCPF2e | HazardPF2e
+}
+```
+
+## Items
+
+Items are documents that can be owned by an actor (embedded items) or stored independently in a compendium or the world items directory. Every piece of a character's build—feats, equipment, spells, conditions—is an item.
+
+<Note>
+  An item owned by an actor is called an **embedded item**. The same item document stored in a compendium or the world items sidebar is a **world item**. When you drag a feat from the compendium to a character sheet, Foundry creates a new embedded copy—changes to that copy do not affect the original.
+</Note>
+
+The system defines 24 concrete item types, organized below by function.
+
+### Character-Building Items
+
+<CardGroup cols={2}>
+  <Card title="ancestry">
+    Defines a character's ancestry (Human, Elf, Dwarf, etc.). Grants attribute boosts, languages, heritages, and ancestry feats via embedded `GrantItem` rule elements.
+  </Card>
+  <Card title="heritage">
+    A subtype of ancestry (Half-Elf, Ancient Elf, etc.) owned by a character. Applies additional ancestry features without being a full ancestry.
+  </Card>
+  <Card title="background">
+    A character's background (Acolyte, Farmer, etc.). Provides attribute boosts, trained skills, and a background feat.
+  </Card>
+  <Card title="class">
+    A character's class (Fighter, Wizard, etc.). Defines key ability, class features at each level, and class feats via a structured feature entry table.
+  </Card>
+  <Card title="feat">
+    Any feat, skill feat, class feature, or general feat. Also covers ancestry feats and archetype feats. The `featType` field distinguishes subtypes.
+  </Card>
+  <Card title="action (ability)">
+    A discrete action or ability, such as a class action, free action, or reaction. Internally typed as `action` in the data model (`AbilityItemPF2e`).
+  </Card>
+</CardGroup>
+
+### Equipment
+
+<CardGroup cols={2}>
+  <Card title="weapon">
+    Any weapon: melee, ranged, unarmed. Tracks damage dice, traits, range, reload, and rune data. Supports fundamental and property runes as subitems.
+  </Card>
+  <Card title="armor">
+    Worn armor and clothing. Tracks AC bonus, dex cap, check penalty, speed penalty, and armor runes as subitems.
+  </Card>
+  <Card title="shield">
+    Held or strapped shields. Tracks hardness, HP, BT, and raised/broken state independent of armor.
+  </Card>
+  <Card title="equipment">
+    General adventuring gear and worn items (backpacks, bandoliers, etc.). Supports subitems for attached runes or augmentations.
+  </Card>
+  <Card title="ammo">
+    Ammunition for ranged weapons. Tracks quantity, type (arrow, bolt, etc.), and damage modifications.
+  </Card>
+  <Card title="consumable">
+    Single-use or rechargeable items: potions, wands, scrolls, bombs, and alchemical items. Tracks uses, charge recovery, and an optional embedded spell.
+  </Card>
+  <Card title="treasure">
+    Currency and valuable objects. Tracks denomination and bulk separately from other physical items.
+  </Card>
+  <Card title="kit">
+    Groups of items sold together (adventurer's kit, healer's tools). Unpacks its contents onto an actor when added.
+  </Card>
+  <Card title="backpack (container)">
+    Containers that hold other physical items. The internal type slug is `backpack`; the document class is `ContainerPF2e`.
+  </Card>
+</CardGroup>
+
+### Spellcasting and Magic
+
+<CardGroup cols={2}>
+  <Card title="spell">
+    Any spell, cantrip, or focus spell. Tracks rank, traditions, components, area, range, targets, save, and damage. Heightening data is stored inline.
+  </Card>
+  <Card title="spellcastingEntry">
+    Represents a spellcasting tradition for a character (e.g., Prepared Arcane, Spontaneous Occult). Owns the spell slots and prepared spell list. Internal type slug is `spellcastingEntry`.
+  </Card>
+</CardGroup>
+
+### Effects and Conditions
+
+<CardGroup cols={2}>
+  <Card title="condition">
+    A PF2e condition (Frightened, Prone, Clumsy, etc.). Tracks value for valued conditions, and links to the conditions compendium for automatic badge management.
+  </Card>
+  <Card title="effect">
+    A timed or persistent effect applied to an actor (usually from a spell, ability, or aura). Supports automatic expiry by turns or real time.
+  </Card>
+  <Card title="affliction">
+    Diseases and poisons. Tracks stage progression, stage effects, onset, save, and automatic stage advancement.
+  </Card>
+</CardGroup>
+
+### Other Item Types
+
+<CardGroup cols={2}>
+  <Card title="deity">
+    A deity or philosophy. Tracks divine font, sanctification, domains, spells, and divine skill for cleric characters.
+  </Card>
+  <Card title="lore">
+    A lore skill (Sailing Lore, Mercantile Lore, etc.) embedded on a character. Tracks proficiency rank separately from core skills.
+  </Card>
+  <Card title="melee">
+    An NPC's melee or ranged strike. Exists only on NPC actors and is separate from the `weapon` type to allow NPC-specific stat block notation.
+  </Card>
+  <Card title="book">
+    A spellbook or formula book. Stores references to spells or formulae the character has access to.
+  </Card>
+  <Card title="campaignFeature">
+    Features specific to a campaign subsystem (e.g., Kingmaker's kingdom building). Typed separately to avoid interfering with standard feat logic.
+  </Card>
+</CardGroup>
+
+## Working with Actors and Items in Code
+
+The `ActorPF2e` base class is at [`src/module/actor/base.ts`](https://github.com/foundryvtt/pf2e/blob/master/src/module/actor/base.ts). Item ownership is accessed through `actor.items` (a `Collection`) and `actor.inventory` (a physical-items-only `ActorInventory`).
+
+```typescript
+// Iterating an actor's items by type
+for (const feat of actor.itemTypes.feat) {
+  console.log(feat.name, feat.system.featType);
+}
+
+// Finding an embedded weapon by slug
+const sword = actor.items.find(
+  (i) => i.isOfType("weapon") && i.slug === "longsword"
+);
+
+// Accessing the inventory (physical items only)
+const totalBulk = actor.inventory.bulk.value;
+```

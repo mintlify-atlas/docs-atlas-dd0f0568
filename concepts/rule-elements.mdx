@@ -1,0 +1,180 @@
+---
+title: "Rule Elements"
+description: "Rule Elements are JSON-configured data model entries on items that modify actor statistics, grant abilities, and alter how the rules engine evaluates rolls."
+---
+
+Rule Elements (REs) are the primary mechanism by which items modify an actor's statistics in the PF2e system. Every feat that grants a bonus, every armor that applies a speed penalty, and every condition that imposes a penalty uses one or more Rule Elements configured as JSON on the item's **Rules** tab.
+
+<Note>
+  The Rules tab is hidden by default. Enable it in **Game Settings → System Settings → Advanced Rule Element UI** to edit rule elements directly on items in the GUI.
+</Note>
+
+## How Rule Elements Work
+
+When an actor's data is prepared, the system iterates every item owned by that actor and calls `RuleElements.fromOwnedItem()` on it. Each rule element in the item's `system.rules` array is instantiated as a subclass of `RuleElement` and applied during the actor's data preparation pipeline.
+
+Physical items (weapons, armor, equipment) automatically set `requiresEquipped: true` on their rule elements unless you override it. An unequipped item's rule elements are marked `ignored` and have no effect.
+
+```typescript
+// src/module/rules/rule-element/base.ts (simplified)
+abstract class RuleElement extends foundry.abstract.DataModel<ItemPF2e<ActorPF2e>> {
+  /** The identifying key that maps to a constructor in RuleElements.builtin */
+  key: string;
+  /** Optional slug for referencing this RE from other REs */
+  slug: string | null;
+  /** Display label shown in the UI */
+  label: string;
+  /** Execution priority — lower numbers run first (default: 100) */
+  priority: number;
+  /** When true, this RE has no effect */
+  ignored: boolean;
+  /** Predicate that must be satisfied for this RE to apply */
+  predicate: Predicate;
+  /** If null, equip status is irrelevant; if true, item must be equipped */
+  requiresEquipped: boolean | null;
+  /** If true, item must also be invested */
+  requiresInvestment: boolean | null;
+}
+```
+
+The full base class is at [`src/module/rules/rule-element/base.ts`](https://github.com/foundryvtt/pf2e/blob/master/src/module/rules/rule-element/base.ts).
+
+## All Built-in Rule Element Types
+
+The `RuleElements.builtin` registry in [`src/module/rules/index.ts`](https://github.com/foundryvtt/pf2e/blob/master/src/module/rules/index.ts) contains every built-in RE type. Custom REs can be registered in `RuleElements.custom` by modules.
+
+<Accordion title="Modifiers and Statistics">
+  | Key | Class | Description |
+  |-----|-------|-------------|
+  | `ActiveEffectLike` | `AELikeRuleElement` | Applies a data model change using Active Effect–style dot-path notation. The most general-purpose RE for direct property overrides. |
+  | `FlatModifier` | `FlatModifierRuleElement` | Adds a typed modifier (circumstance, status, item, untyped) of a fixed or formula value to one or more roll selectors. Subject to stacking rules. |
+  | `AdjustModifier` | `AdjustModifierRuleElement` | Changes the value, type, or selector of an existing modifier applied by another RE. Used to upgrade bonuses conditionally. |
+  | `DamageDice` | `DamageDiceRuleElement` | Adds, upgrades, or downgrades damage dice on a strike or spell. Supports the `dieSize` and `diceNumber` fields. |
+  | `DamageAlteration` | `DamageAlterationRuleElement` | Alters properties of a damage roll: type, category, or whether it qualifies for precision/splash. |
+  | `BaseSpeed` | `BaseSpeedRuleElement` | Sets or modifies a movement speed type (land, fly, swim, burrow, climb). |
+  | `DexterityModifierCap` | `DexterityModifierCapRuleElement` | Applies a cap to the Dexterity modifier added to AC (as armor's Max Dex). |
+  | `MultipleAttackPenalty` | `MultipleAttackPenaltyRuleElement` | Reduces the multiple attack penalty for qualifying strikes. |
+  | `SpecialStatistic` | `SpecialStatisticRuleElement` | Creates a new statistic (e.g., a class DC) that can be referenced by other rules. |
+</Accordion>
+
+<Accordion title="Strikes and Combat">
+  | Key | Class | Description |
+  |-----|-------|-------------|
+  | `Strike` | `StrikeRuleElement` | Grants a new strike action (unarmed attack, natural weapon, etc.) to the actor. |
+  | `AdjustStrike` | `AdjustStrikeRuleElement` | Modifies an existing strike's traits, damage, or range. |
+  | `CriticalSpecialization` | `CritSpecRuleElement` | Grants or suppresses critical specialization effects for qualifying weapons. |
+  | `SubstituteRoll` | `SubstituteRollRuleElement` | Substitutes a different die roll for a specific check (e.g., use the higher of two d20s). |
+  | `RollTwice` | `RollTwiceRuleElement` | Implements fortune/misfortune: roll twice and take the higher or lower result. |
+  | `AdjustDegreeOfSuccess` | `AdjustDegreeOfSuccessRuleElement` | Shifts the outcome of a roll up or down one degree of success on qualifying checks. |
+  | `MartialProficiency` | `MartialProficiencyRuleElement` | Grants or modifies proficiency rank with a weapon group or category. |
+</Accordion>
+
+<Accordion title="Grants and Effects">
+  | Key | Class | Description |
+  |-----|-------|-------------|
+  | `GrantItem` | `GrantItemRuleElement` | Automatically grants another item (by UUID) to the actor when this item is added. Handles removal when the parent item is removed. |
+  | `ItemAlteration` | `ItemAlterationRuleElement` | Modifies a property of another owned item (e.g., upgrades a granted item's level or changes its name). |
+  | `EphemeralEffect` | `EphemeralEffectRuleElement` | Applies a temporary effect to a target during a roll, without permanently adding the effect to the target. |
+  | `FastHealing` | `FastHealingRuleElement` | Grants fast healing or regeneration. Supports the value being a formula. |
+  | `TempHP` | `TempHPRuleElement` | Grants temporary hit points, typically when the item is added. |
+  | `LoseHitPoints` | `LoseHitPointsRuleElement` | Directly removes hit points from the actor (used for some activation costs). |
+</Accordion>
+
+<Accordion title="IWR: Immunities, Weaknesses, Resistances">
+  | Key | Class | Description |
+  |-----|-------|-------------|
+  | `Immunity` | `ImmunityRuleElement` | Grants immunity to a damage type, condition, or other trait. |
+  | `Weakness` | `WeaknessRuleElement` | Applies a weakness to a damage type. |
+  | `Resistance` | `ResistanceRuleElement` | Applies a resistance to a damage type, optionally with a maximum value. |
+</Accordion>
+
+<Accordion title="Senses and Token">
+  | Key | Class | Description |
+  |-----|-------|-------------|
+  | `Sense` | `SenseRuleElement` | Grants or upgrades a sense (darkvision, tremorsense, etc.) with a specified acuity and range. |
+  | `TokenImage` | `TokenImageRuleElement` | Changes the actor's token image (e.g., while a polymorph effect is active). |
+  | `TokenName` | `TokenNameRuleElement` | Overrides the name displayed on the actor's token. |
+  | `TokenLight` | `TokenLightRuleElement` | Attaches a light source to the token (for items like a lit torch). |
+  | `TokenEffectIcon` | `TokenEffectIconRuleElement` | Displays a status icon overlay on the token without adding a full condition or effect. |
+  | `TokenMark` | (token-mark/) | Applies a persistent visual mark to a token for targeting or identification purposes. |
+</Accordion>
+
+<Accordion title="Actor Properties">
+  | Key | Class | Description |
+  |-----|-------|-------------|
+  | `ActorTraits` | `ActorTraitsRuleElement` | Adds or removes traits from the actor (e.g., adding the `construct` trait while in battle form). |
+  | `CreatureSize` | `CreatureSizeRuleElement` | Changes the actor's size category. Updates token dimensions automatically via `SIZE_LINKABLE_ACTOR_TYPES`. |
+  | `RollOption` | `RollOptionRuleElement` | Sets a boolean roll option on the actor that other REs and macros can check via predicates. |
+  | `RollNote` | (RollNote) | Appends a situational note to roll results when its predicate is satisfied. The key in the registry is `Note`. |
+  | `ChoiceSet` | `ChoiceSetRuleElement` | Presents a selection prompt when an item is first added. Stores the chosen value as a roll option. |
+  | `Aura` | `AuraRuleElement` | Defines an aura that applies effects to nearby tokens meeting the aura's criteria. |
+  | `BattleForm` | `BattleFormRuleElement` | Manages the complex stat block replacement used by wild shape, battle forms, and polymorph effects. |
+  | `CraftingAbility` | `CraftingAbilityRuleElement` | Registers a special crafting ability (like the Alchemist's infused reagents) with the crafting subsystem. |
+  | `SpecialResource` | `SpecialResourceRuleElement` | Defines a special limited resource (Focus Points, Hero Points, etc.) tracked on the character sheet. |
+</Accordion>
+
+## JSON Example: FlatModifier
+
+The following example adds a +1 circumstance bonus to Perception checks when you are in a specific condition. Place this JSON in an item's **Rules** tab:
+
+```json
+{
+  "key": "FlatModifier",
+  "selector": "perception",
+  "type": "circumstance",
+  "value": 1,
+  "label": "Keen Eyes (Circumstance)",
+  "predicate": ["self:condition:status-effect"],
+  "priority": 100
+}
+```
+
+A more complete example granting an item bonus to AC only while the item is invested:
+
+```json
+{
+  "key": "FlatModifier",
+  "selector": "ac",
+  "type": "item",
+  "value": 2,
+  "label": "Bracers of Defense",
+  "requiresInvestment": true
+}
+```
+
+For a formula-driven bonus that scales with the item level:
+
+```json
+{
+  "key": "FlatModifier",
+  "selector": ["athletics", "acrobatics"],
+  "type": "item",
+  "value": "@item.level >= 11 ? 2 : 1",
+  "label": "Acrobat's Shoes Bonus"
+}
+```
+
+## Rule Element Evaluation Order
+
+Rule elements execute in `priority` order (ascending). The default priority is `100`. REs with the same priority execute in item-insertion order. Use explicit priorities when a RE must run before or after another:
+
+- **Priority < 100**: runs before most modifiers (useful for grants that other REs depend on)
+- **Priority 100**: default
+- **Priority > 100**: runs after standard modifiers (useful for adjustments that depend on other modifiers being present)
+
+<Tip>
+  Use the **Roll Inspector** (click the `i` icon on any roll result in chat) to see every modifier and rule element that contributed to a roll. This is the fastest way to debug why a bonus is not being applied.
+</Tip>
+
+## Custom Rule Elements
+
+Modules can register their own rule element types by adding to `RuleElements.custom` before actors are prepared:
+
+```typescript
+// game.pf2e.RuleElements is available after the system's "init" hook fires
+Hooks.once("init", () => {
+    game.pf2e.RuleElements.custom["MyModule.CustomRE"] = MyCustomRuleElement;
+});
+```
+
+Custom REs must extend `RuleElement` and implement at minimum the static `defineSchema()` method.

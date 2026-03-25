@@ -1,0 +1,273 @@
+---
+title: "Damage System"
+description: "Architecture of the PF2e damage system: damage types, dice, IWR, critical doubling, and the programmatic API."
+---
+
+The PF2e damage system is more structured than a simple numeric pool. Damage is organized into **instances** (each with a type and category), processed through the target's **IWR** (Immunities, Weaknesses, Resistances), then summed into a final value. This page explains the architecture so you can read, extend, and interact with it programmatically.
+
+## Damage Types
+
+Every damage roll carries one or more types. Types are defined in `src/module/system/damage/values.ts`.
+
+<Tabs>
+  <Tab title="Physical">
+    ```typescript
+    const PHYSICAL_DAMAGE_TYPES = [
+      "bludgeoning",
+      "piercing",
+      "slashing",
+      "bleed",       // persistent physical
+    ] as const;
+    ```
+    Physical damage maps to the `"physical"` category for IWR purposes.
+  </Tab>
+  <Tab title="Energy">
+    ```typescript
+    const ENERGY_DAMAGE_TYPES = [
+      "acid",
+      "cold",
+      "electricity",
+      "fire",
+      "sonic",
+      "force",
+      "vitality",    // positive energy (heals living, damages undead)
+      "void",        // negative energy (heals undead, damages living)
+    ] as const;
+    ```
+    Energy damage maps to the `"energy"` category.
+  </Tab>
+  <Tab title="Other">
+    ```typescript
+    // No category: processed individually by IWR
+    "mental"
+    "poison"
+    "spirit"
+    "untyped"   // always applies; no immunities or resistances exist for it
+    ```
+  </Tab>
+</Tabs>
+
+### Category Mapping
+
+```typescript
+// Base category for each type (immutable unless overridden by homebrew)
+const BASE_DAMAGE_TYPES_TO_CATEGORIES: Record<DamageType, DamageCategory | null> = {
+  bludgeoning: "physical",
+  piercing:    "physical",
+  slashing:    "physical",
+  bleed:       "physical",
+
+  acid:        "energy",
+  cold:        "energy",
+  electricity: "energy",
+  fire:        "energy",
+  sonic:       "energy",
+  vitality:    "energy",
+  void:        "energy",
+  force:       "energy",
+
+  mental:  null,
+  poison:  null,
+  spirit:  null,
+  untyped: null,
+};
+```
+
+---
+
+## Damage Categories (Unique)
+
+Beyond the physical/energy split, individual damage instances can carry a **unique category** that changes how they interact with IWR:
+
+```typescript
+const DAMAGE_CATEGORIES_UNIQUE = [
+  "persistent",  // applied at the start of the target's turn
+  "precision",   // immune creatures with 'precision immunity' ignore this
+  "splash",      // affects adjacent creatures
+] as const;
+```
+
+### Persistent Damage
+
+Persistent damage (bleed, persistent fire, persistent poison) is tracked as a separate `persistent-damage` condition on the actor. On each of the target's turns, the GM can attempt a flat DC 15 check to remove it. The `DamageDamageContext` includes the persistent instances separated from the main total so they can be added as conditions independently.
+
+### Splash Damage
+
+Splash damage appears on thrown alchemical weapons and some spells. It applies a fixed amount of damage to all creatures adjacent to the target (including the thrower). Splash damage is not doubled on a critical hit.
+
+### Precision Damage
+
+Precision damage represents the extra harm from striking a vital spot. Some creatures are immune to precision damage (e.g., oozes, swarms). The system checks for precision immunity separately from the damage type's category immunity.
+
+---
+
+## Damage Dice and Modifiers
+
+A weapon or spell's damage formula is built from two collections in `DamageFormulaData`:
+
+```typescript
+interface DamageFormulaData {
+  base:        BaseDamageData[];    // the weapon/spell's base dice
+  dice:        DamageDicePF2e[];    // bonus dice from rule elements
+  modifiers:   Modifier[];          // flat numeric bonuses/penalties
+  maxIncreases?: number;            // weapons cap die increases at 1
+  bypass?:     DamageIRBypassData; // immunity/resistance override data
+  kinds?:      Set<DamageKind>;     // "damage" | "healing"
+}
+```
+
+### Base Damage Data
+
+```typescript
+interface BaseDamageData {
+  damageType:  DamageType;
+  diceNumber?: number;     // number of dice, e.g. 2 for 2d6
+  dieSize?:    DamageDieSize | null;  // "d4" | "d6" | "d8" | "d10" | "d12"
+  modifier?:   number;     // flat bonus added to this damage instance
+  category:    DamageCategoryUnique | null;
+  materials?:  MaterialDamageEffect[];  // for DR/immunity bypass
+  tags?:       string[];
+}
+```
+
+### Bonus Dice from Rule Elements
+
+The `DamageDice` rule element adds extra dice to a weapon's damage pool. These are collected in the `dice` array of `DamageFormulaData` and merged into the formula. A `DamageDice` rule element can specify a die size upgrade (`dieSize: "d10"`) or a fixed number of bonus dice.
+
+---
+
+## Critical Damage Doubling
+
+On a critical hit, the system doubles the damage according to the world's `critRule` setting:
+
+<Tabs>
+  <Tab title="Double Damage (default)">
+    The entire damage total is calculated first, then multiplied by 2. This is the standard Pathfinder 2e rule.
+  </Tab>
+  <Tab title="Double Dice">
+    The number of dice is doubled before rolling. Flat modifiers are added once. This is an optional setting some groups prefer.
+  </Tab>
+</Tabs>
+
+The `CriticalInclusion` type controls per-instance doubling behavior:
+
+```typescript
+/**
+ * null  = double on crit (most damage)
+ * true  = critical-only, don't double (e.g., some precision effects)
+ * false = don't double on crit (splash damage, persistent damage)
+ */
+type CriticalInclusion = boolean | null;
+```
+
+`ResolvedDamageFormulaData` stores separate formula strings for each degree of success:
+
+```typescript
+interface ResolvedDamageFormulaData {
+  formula: Record<DegreeOfSuccessString, string | null>;
+  breakdown: Record<DegreeOfSuccessString, string[]>;
+}
+```
+
+---
+
+## IWR: Immunities, Weaknesses, and Resistances
+
+The `applyIWR` function in `src/module/system/damage/iwr.ts` processes all damage instances against the target actor's `immunities`, `weaknesses`, and `resistances` arrays.
+
+### Processing Order
+
+<Steps>
+  <Step title="Check applicability">
+    If the actor is not affected by the damage type at all (e.g., constructs and bleed), the instance is skipped entirely.
+  </Step>
+  <Step title="Immunities">
+    If the actor has an immunity that matches the instance's type or traits, the instance total is reduced to zero. Immunity redirection (e.g., fire immunity redirects fire to fire resistance) is handled here.
+  </Step>
+  <Step title="Weaknesses">
+    Matching weaknesses add to the instance total. Apply-once weaknesses (those that trigger regardless of how many instances there are) are tracked separately.
+  </Step>
+  <Step title="Resistances">
+    Matching resistances reduce the instance total by their value (minimum 0). Ignored resistances and redirected resistances from bypass data are handled here.
+  </Step>
+</Steps>
+
+The automation setting `game.pf2e.settings.iwr` (enabled by default) controls whether IWR processing runs automatically when damage is applied. If disabled, the raw total is applied without modification.
+
+### Reading an Actor's IWR
+
+```typescript
+const actor = canvas.tokens.controlled[0]?.actor;
+if (!actor) return;
+
+// Access structured IWR arrays
+const { immunities, weaknesses, resistances } = actor.attributes;
+
+console.log("Immunities:");
+for (const immunity of immunities) {
+  console.log(`  ${immunity.label} (type: ${immunity.type})`);
+}
+
+console.log("Weaknesses:");
+for (const weakness of weaknesses) {
+  console.log(`  ${weakness.label}: ${weakness.value}`);
+}
+
+console.log("Resistances:");
+for (const resistance of resistances) {
+  console.log(`  ${resistance.label}: ${resistance.value}`);
+}
+```
+
+---
+
+## Strike Workflow
+
+When a player clicks the Strike button on their character sheet, the system executes a multi-step workflow:
+
+<Steps>
+  <Step title="Build the attack roll statistic">
+    The weapon's `Statistic` is constructed with domains like `["attack", "attack-roll", "all"]`. The `CheckModifier` stack includes the proficiency bonus, attribute modifier (STR/DEX), potency rune bonus, and any circumstance/status modifiers from active conditions and effects.
+  </Step>
+  <Step title="Roll the attack check">
+    `Check.roll` is called with `type: "attack-roll"` and the target's AC as the DC. The degree of success determines whether damage is rolled at all.
+  </Step>
+  <Step title="Build the damage formula">
+    `WeaponDamagePF2e.calculate` assembles `DamageFormulaData` from the weapon's base dice, striking rune die count, damage-type rule elements, and any modifiers. The formula is resolved into separate strings for hit vs. critical hit.
+  </Step>
+  <Step title="Roll or display damage">
+    If the check was a hit, a "Roll Damage" button appears in the chat card. Players or the GM click it to roll damage.
+  </Step>
+  <Step title="Apply damage">
+    When damage is applied to a token, `applyIWR` runs if the automation setting is on, and the actor's HP is updated.
+  </Step>
+</Steps>
+
+---
+
+## DamageTemplate Types
+
+```typescript
+// Weapon strikes (pre-rolled formula string per degree of success)
+type WeaponDamageTemplate = {
+  name:      string;
+  materials: MaterialDamageEffect[];
+  damage:    ResolvedDamageFormulaData;
+};
+
+// Spells and afflictions (a single DamageRoll for the whole thing)
+type SpellDamageTemplate = {
+  name:     string;
+  materials: MaterialDamageEffect[];
+  damage: {
+    roll:      DamageRoll;
+    breakdown: string[];
+  };
+};
+
+type DamageTemplate =
+  | WeaponDamageTemplate
+  | SpellDamageTemplate
+  | AfflictionDamageTemplate
+  | SimpleDamageTemplate;
+```

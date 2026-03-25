@@ -1,0 +1,140 @@
+---
+title: "Installation"
+description: "Install the PF2e system through the Foundry VTT UI, a manifest URL, or directly from source for contributor development."
+---
+
+The PF2e system supports three installation methods. Choose the one that matches your situation.
+
+## Version compatibility
+
+| PF2e version | Foundry minimum | Foundry verified | Foundry maximum |
+|---|---|---|---|
+| 7.11.3 | 13.348 | 13.351 | 13.x |
+
+<Warning>
+  The system targets Foundry VTT **v13** exclusively. Running it on Foundry v12 or earlier is not supported and will produce errors.
+</Warning>
+
+## Installation methods
+
+<Tabs>
+  <Tab title="From the Foundry UI">
+    The simplest way to install the system. Foundry handles downloading and installing everything for you.
+
+    <Steps>
+      <Step title="Open Game Systems">
+        Launch Foundry VTT and navigate to the **Setup** screen. Click the **Game Systems** tab.
+      </Step>
+      <Step title="Open the installer">
+        Click **Install System** to open the system browser.
+      </Step>
+      <Step title="Search and install">
+        Type `Pathfinder Second Edition` in the search field and press Enter. Locate the system in the results — published by **The PF2e System Developers** — and click **Install**.
+
+        Foundry downloads the system and adds it to your installed systems list. Installation is complete when the progress bar finishes and the system appears with version **7.11.3**.
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Manual (manifest URL)">
+    Use the manifest URL to install a specific version or to install from the development branch. This method is also useful if the automatic search does not return results.
+
+    <Steps>
+      <Step title="Copy the manifest URL">
+        The manifest URL for the current release branch is:
+
+        ```text
+        https://raw.githubusercontent.com/foundryvtt/pf2e/v13-dev/system.pf2e.json
+        ```
+      </Step>
+      <Step title="Open the installer">
+        In the Foundry VTT **Setup** screen, click the **Game Systems** tab, then click **Install System**.
+      </Step>
+      <Step title="Paste the URL and install">
+        Scroll to the bottom of the Install System dialog. Paste the manifest URL into the **Manifest URL** field and click **Install**.
+
+        Foundry fetches the manifest, resolves the download URL, and installs the system.
+      </Step>
+    </Steps>
+
+    <Note>
+      The manifest URL always points to the latest build on the `v13-dev` branch. To pin to a specific release, use the download URL for that release tag from the [GitHub releases page](https://github.com/foundryvtt/pf2e/releases).
+    </Note>
+  </Tab>
+
+  <Tab title="From source">
+    Install from source if you want to contribute to the system or test unreleased changes. This requires Node.js 20.15.0 or later and `pnpm`.
+
+    <Steps>
+      <Step title="Clone the repository">
+        ```bash
+        git clone https://github.com/foundryvtt/pf2e.git
+        cd pf2e
+        ```
+      </Step>
+      <Step title="Install dependencies">
+        ```bash
+        npm ci
+        ```
+
+        This installs all build-time dependencies defined in `package.json` using the locked versions from `package-lock.json`.
+      </Step>
+      <Step title="Link to your Foundry data folder">
+        The build output needs to be accessible to Foundry VTT as a game system. Run the link script and follow the prompts to point it at your Foundry user data directory:
+
+        ```bash
+        npm run link
+        ```
+
+        This creates a symbolic link from the `dist/` build output directory into your Foundry `Data/systems/pf2e` folder.
+      </Step>
+      <Step title="Build the system">
+        Run a one-off production build:
+
+        ```bash
+        pnpm run build --system=pf2e
+        ```
+
+        This compiles TypeScript, bundles assets, and processes compendium packs into the `dist/` directory.
+      </Step>
+      <Step title="Start the watch process for development">
+        To have the system rebuild automatically as you edit source files:
+
+        ```bash
+        npm run watch
+        ```
+
+        The watch process first builds compendium packs, then starts Vite in development mode. Changes to TypeScript and SCSS files trigger incremental rebuilds. Refresh Foundry VTT in your browser to pick up changes.
+      </Step>
+    </Steps>
+
+    <Info>
+      To update compendium data, edit items directly inside your running Foundry world and then run:
+
+      ```bash
+      pnpm run extractPacks <compendium-db-filename> --system=pf2e
+      ```
+
+      This extracts the modified documents back into the source JSON files. Do not edit the compendium JSON files directly.
+    </Info>
+  </Tab>
+</Tabs>
+
+## After installation
+
+Once the system is installed, create a world that uses it:
+
+1. Go to the **Game Worlds** tab on the Setup screen.
+2. Click **Create World** and select **Pathfinder Second Edition** as the game system.
+3. Launch the world and log in as the Gamemaster.
+
+On first launch, the system runs any necessary data migrations automatically. For new worlds, this is instantaneous. For worlds migrated from an earlier PF2e version, a migration summary dialog will appear.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create a world and your first character.
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="/contributing/setup">
+    Full contributor environment setup guide.
+  </Card>
+</CardGroup>

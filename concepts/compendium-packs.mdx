@@ -1,0 +1,180 @@
+---
+title: "Compendium Packs"
+description: "Compendium packs are Foundry VTT's persistent content libraries. The PF2e system ships nearly 100 packs covering everything from character-building options to full bestiaries."
+---
+
+Compendium packs are Foundry VTT's content libraries — read-only (in production) collections of documents that are distributed with a system or module. The PF2e system ships **94 compendium packs** stored under [`packs/pf2e/`](https://github.com/foundryvtt/pf2e/tree/master/packs/pf2e), covering every aspect of the Pathfinder 2e rules.
+
+Each pack is a directory of YAML source files that get compiled into a LevelDB database at build time. You reference compendium entries in text using the inline link format:
+
+```
+@Compendium[pf2e.spells.Fireball]{Fireball}
+```
+
+## Character Building
+
+These packs contain the content players need to build and advance characters.
+
+| Pack | Contents |
+|------|----------|
+| `ancestries` | All published ancestries (Human, Elf, Dwarf, Gnome, …) |
+| `ancestry-features` | Ancestry features and heritage feats granted at character creation |
+| `heritages` | Heritage items for each ancestry (Half-Elf, Ancient Elf, Razortooth Goblin, …) |
+| `backgrounds` | All published backgrounds |
+| `classes` | Class documents (Fighter, Wizard, Rogue, …) |
+| `class-features` | Class feature items granted at each class level |
+| `feats` | All general feats, skill feats, class feats, and archetype feats |
+| `spells` | Every published spell, cantrip, and focus spell |
+| `deities` | Deities and philosophies with their divine font, domains, and cleric spells |
+| `familiar-abilities` | Familiar and master abilities for the familiar subsystem |
+| `boons-and-curses` | Divine boons and curses awarded by deities |
+| `pathfinder-society-boons` | Organized Play boons for PFS players |
+
+## Equipment
+
+All physical items are in the `equipment` pack, which contains weapons, armor, adventuring gear, consumables, shields, and treasure.
+
+| Pack | Contents |
+|------|----------|
+| `equipment` | The primary equipment pack — weapons, armor, shields, adventuring gear, consumables, alchemical items, magical items, and treasure |
+| `equipment-effects` | Effects that activate when equipment is used (e.g., potion of healing effect) |
+| `vehicles` | Vehicle stat blocks (ships, wagons, siege engines) |
+| `iconics` | Paizo iconic pregenerated characters with full gear |
+| `paizo-pregens` | Official Paizo pregenerated characters |
+
+## Bestiary and NPCs
+
+The system ships a large number of bestiary packs — one for each published Pathfinder source book.
+
+<Accordion title="Core Bestiaries">
+  | Pack | Contents |
+  |------|----------|
+  | `pathfinder-bestiary` | Bestiary (1st volume) — foundational creatures |
+  | `pathfinder-bestiary-2` | Bestiary 2 |
+  | `pathfinder-bestiary-3` | Bestiary 3 |
+  | `pathfinder-monster-core` | Monster Core (Remaster) |
+  | `pathfinder-monster-core-2` | Monster Core 2 (Remaster) |
+  | `pathfinder-npc-core` | NPC Core — humanoid NPCs and society figures |
+  | `npc-gallery` | Supplemental NPCs and variant creatures |
+  | `bestiary-ability-glossary-srd` | Reusable ability blocks shared across bestiary entries |
+  | `bestiary-family-ability-glossary` | Shared family abilities (dragon breath, undead immunities, etc.) |
+  | `bestiary-effects` | Effects spawned by bestiary creature abilities |
+</Accordion>
+
+<Accordion title="Adventure Path Bestiaries">
+  The following packs each contain the unique creatures from their respective Adventure Path:
+
+  - `age-of-ashes-bestiary`
+  - `agents-of-edgewatch-bestiary`
+  - `abomination-vaults-bestiary`
+  - `blood-lords-bestiary`
+  - `book-of-the-dead-bestiary`
+  - `curtain-call-bestiary`
+  - `extinction-curse-bestiary`
+  - `fists-of-the-ruby-phoenix-bestiary`
+  - `gatewalkers-bestiary`
+  - `kingmaker-bestiary`
+  - `outlaws-of-alkenstar-bestiary`
+  - `quest-for-the-frozen-flame-bestiary`
+  - `revenge-of-the-runelords-bestiary`
+  - `season-of-ghosts-bestiary`
+  - `seven-dooms-for-sandpoint-bestiary`
+  - `sky-kings-tomb-bestiary`
+  - `stolen-fate-bestiary`
+  - `strength-of-thousands-bestiary`
+  - `triumph-of-the-tusk-bestiary`
+  - `war-of-immortals-bestiary`
+  - And many more AP and standalone adventure bestiaries
+</Accordion>
+
+<Accordion title="Organized Play Bestiaries">
+  PFS scenario creatures are split by season:
+
+  - `pfs-introductions-bestiary`
+  - `pfs-season-1-bestiary` through `pfs-season-7-bestiary`
+</Accordion>
+
+## Effects and Conditions
+
+Effects are auto-applied items that represent ongoing mechanical states. Conditions are a special subset that follow PF2e's official condition rules.
+
+| Pack | Contents |
+|------|----------|
+| `conditions` | All 47 official PF2e conditions (Frightened, Prone, Clumsy, Stunned, etc.) |
+| `feat-effects` | Effects applied when feat abilities activate |
+| `spell-effects` | Effects applied by spells (duration tracking, persistent bonuses) |
+| `campaign-effects` | Effects used by campaign-specific subsystems (kingdom events, etc.) |
+| `other-effects` | Miscellaneous effects not tied to a specific feature |
+
+## Hazards and Actions
+
+| Pack | Contents |
+|------|----------|
+| `hazards` | All published hazards (traps, environmental dangers, complex hazards) |
+| `actions` | Exploration, downtime, and basic actions (Seek, Recall Knowledge, etc.) |
+| `adventure-specific-actions` | Special actions used only in specific adventures |
+| `action-macros` | Macro documents that automate common action rolls |
+
+## Adventure and Campaign Content
+
+| Pack | Contents |
+|------|----------|
+| `standalone-adventures` | Self-contained adventure content (Troubles in Otari, Menace Under Otari, etc.) |
+| `fall-of-plaguestone` | The Fall of Plaguestone adventure content |
+| `malevolence-bestiary` | Creatures from Malevolence |
+| `pathfinder-dark-archive` | Dark Archive content |
+| `kingmaker-features` | Kingmaker campaign features and kingdom building items |
+| `journals` | Journal entry documents used by system features |
+| `rollable-tables` | Random tables (critical hit/fumble decks, treasure tables) |
+| `criticaldeck` | The Pathfinder Critical Hit and Critical Fumble deck entries |
+| `macros` | Automation macros bundled with the system |
+
+## Using the Compendium Browser
+
+In-game, you can search all installed compendium packs using the **Compendium Browser** (the book icon in the scene toolbar, or via the sidebar). The browser provides filtered views for:
+
+- **Spells** — filter by tradition, school, rank, trait, and action cost
+- **Equipment** — filter by item type, level, price range, and traits
+- **Feats** — filter by type, prerequisite, skill, and ancestry
+- **Actions** — browse exploration, downtime, and encounter actions
+- **Bestiary** — filter creatures by level, traits, alignment, and source
+- **Hazards** — filter by level, complexity, and traits
+
+<Tip>
+  The Compendium Browser indexes all active compendium packs—including those from installed modules. Use **Game Settings → Compendium Browser Settings** to hide packs you don't want included in search results.
+</Tip>
+
+## Inline Compendium Links
+
+When authoring journal entries, item descriptions, or NPC ability text, you can embed live links to compendium entries. Clicking the link in play opens the document sheet:
+
+```
+@Compendium[pf2e.spells.Fireball]{Fireball}
+@Compendium[pf2e.conditions.Frightened]{Frightened 2}
+@Compendium[pf2e.feats.Assurance]{Assurance (Athletics)}
+```
+
+The format is `@Compendium[<system-id>.<pack-name>.<Document Name>]{Display Text}`.
+
+## Contributing Compendium Content
+
+Compendium source files live in `packs/pf2e/<pack-name>/` as individual YAML files. When contributing or editing compendium content:
+
+<Steps>
+  <Step title="Edit the YAML source">
+    Each document is a single `.yml` file named after the document's slug. Edit the YAML directly — do not edit the compiled database.
+  </Step>
+  <Step title="Follow naming conventions">
+    File names must be the document's slug (lowercase, hyphenated). The document's `name` field should match the official Paizo publication exactly, including capitalization.
+  </Step>
+  <Step title="Use compendium UUIDs for cross-references">
+    When one compendium entry references another, use the full `Compendium.pf2e.<pack>.<id>` UUID format. Avoid hard-coding item IDs that may differ between worlds.
+  </Step>
+  <Step title="Run the build">
+    After editing YAML source, run `npm run build:packs` to compile the sources into the LevelDB databases that Foundry reads.
+  </Step>
+</Steps>
+
+<Warning>
+  Never edit the compiled pack databases in `packs/pf2e/<pack-name>/_source` directly in a production world. Always work from the YAML source files in the repository and rebuild.
+</Warning>

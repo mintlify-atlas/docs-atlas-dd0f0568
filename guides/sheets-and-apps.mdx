@@ -1,0 +1,278 @@
+---
+title: "Sheets and Applications"
+description: "An overview of the actor sheets, item sheets, and custom applications in the PF2e Foundry VTT system."
+---
+
+The PF2e system replaces Foundry's default actor and item sheets with fully custom implementations and adds a suite of specialized applications for gameplay workflows. This page covers where each sheet and application lives, how they are registered, and how to interact with them programmatically.
+
+## Foundry VTT application architecture
+
+Foundry V12 provides two primary base classes for UI:
+
+- **`ApplicationV2`** — the modern base for all new applications. The PF2e system uses this along with the `HandlebarsApplicationMixin` (for Handlebars-rendered UIs) and the custom `SvelteApplicationMixin` (for Svelte-rendered UIs).
+- **`DocumentSheet` / `ActorSheet` / `ItemSheet`** — legacy V1 application base for actor and item sheets. The system currently uses `ActorSheetPF2e` (extending the legacy `ActorSheet`) and `ItemSheetPF2e` (extending `ItemSheet`) as the PF2e-specific sheet base classes.
+
+Sheets are registered in `src/scripts/register-sheets.ts` via the Foundry API:
+
+```typescript
+fd.collections.Actors.registerSheet("pf2e", CharacterSheetPF2e, {
+  types: ["character"],
+  label: "...",
+  makeDefault: true,
+});
+```
+
+The `"pf2e"` scope ensures the system's sheets take precedence over core defaults while remaining overridable by modules.
+
+## Actor sheets
+
+Each actor type has a dedicated sheet class registered as the default for that type.
+
+<CardGroup cols={2}>
+  <Card title="CharacterSheetPF2e" icon="user">
+    **Actor type:** `character`
+
+    The full player character sheet. Renders the inventory, skills, feats, spellcasting, biography, and actions tabs. Includes a tab manager (`tab-manager.ts`) that saves and restores the active tab per actor. Located in `src/module/actor/character/sheet.ts`.
+  </Card>
+
+  <Card title="NPCSheetPF2e" icon="dragon">
+    **Actor type:** `npc` (default)
+
+    The standard NPC stat block sheet. Displays strikes, spells, saves, HP, and all NPC-specific fields in a compact layout suited for GM use during encounters.
+
+    A second sheet, **`SimpleNPCSheet`**, is also registered for the `npc` type with `canBeDefault: false`. It provides a stripped-down view for GMs who prefer minimal stat blocks. Located in `src/module/actor/npc/sheet.ts`.
+  </Card>
+
+  <Card title="FamiliarSheetPF2e" icon="paw">
+    **Actor type:** `familiar`
+
+    The familiar sheet. Displays the master link, derived statistics, and familiar ability items. Located in `src/module/actor/familiar/sheet.ts`.
+  </Card>
+
+  <Card title="HazardSheetPF2e" icon="triangle-exclamation">
+    **Actor type:** `hazard`
+
+    The hazard sheet. Shows stealth DC, disable checks, reset conditions, routine actions, and hardness/HP for complex hazards. Located in `src/module/actor/hazard/sheet.ts`.
+  </Card>
+
+  <Card title="LootSheetPF2e" icon="chest">
+    **Actor type:** `loot`
+
+    The loot container sheet. Lets the GM view and distribute items to players. Players with Observer permission can view the sheet and pick up items. Located in `src/module/actor/loot/sheet.ts`.
+  </Card>
+
+  <Card title="VehicleSheetPF2e" icon="ship">
+    **Actor type:** `vehicle`
+
+    The vehicle sheet. Displays piloting DC, crew requirements, speed, and collision damage. Located in `src/module/actor/vehicle/sheet.ts`.
+  </Card>
+
+  <Card title="PartySheetPF2e" icon="users">
+    **Actor type:** `party`
+
+    The party sheet. Shows member actors, travel speed, exploration activities, and camping mechanics. Located in `src/module/actor/party/sheet.ts`.
+  </Card>
+
+  <Card title="ArmySheetPF2e" icon="chess-rook">
+    **Actor type:** `army`
+
+    The army sheet for the Warfare mass combat subsystem. Displays morale, scouting, tactics, and gear. Located in `src/module/actor/army/sheet.ts`.
+  </Card>
+</CardGroup>
+
+## Item sheets
+
+Every item type also has a dedicated sheet. They are all registered in `registerSheets()` via `sheetEntries`:
+
+| Item type | Sheet class | Source |
+|---|---|---|
+| `action` | `AbilitySheetPF2e` | `@item/ability/sheet.ts` |
+| `affliction` | `AfflictionSheetPF2e` | `@item/affliction/sheet.ts` |
+| `ammo` | `AmmoSheetPF2e` | `@item/ammo/sheet.ts` |
+| `ancestry` | `AncestrySheetPF2e` | `@item/ancestry/sheet.ts` |
+| `armor` | `ArmorSheetPF2e` | `@item/armor/sheet.ts` |
+| `background` | `BackgroundSheetPF2e` | `@item/background/sheet.ts` |
+| `backpack` | `ContainerSheetPF2e` | `@item/container/sheet.ts` |
+| `book` | `BookSheetPF2e` | `@item/book/sheet.ts` |
+| `campaignFeature` | `CampaignFeatureSheetPF2e` | `@item/campaign-feature/sheet.ts` |
+| `class` | `ClassSheetPF2e` | `@item/class/sheet.ts` |
+| `condition` | `ConditionSheetPF2e` | `@item/condition/sheet.ts` |
+| `consumable` | `ConsumableSheetPF2e` | `@item/consumable/sheet.ts` |
+| `deity` | `DeitySheetPF2e` | `@item/deity/sheet.ts` |
+| `effect` | `EffectSheetPF2e` | `@item/effect/sheet.ts` |
+| `equipment` | `EquipmentSheetPF2e` | `@item/equipment/sheet.ts` |
+| `feat` | `FeatSheetPF2e` | `@item/feat/sheet.ts` |
+| `heritage` | `HeritageSheetPF2e` | `@item/heritage/sheet.ts` |
+| `kit` | `KitSheetPF2e` | `@item/kit/sheet.ts` |
+| `lore` | `LoreSheetPF2e` | `@item/lore.ts` |
+| `melee` | `MeleeSheetPF2e` | `@item/melee/sheet.ts` |
+| `shield` | `ShieldSheetPF2e` | `@item/shield/sheet.ts` |
+| `spell` | `SpellSheetPF2e` | `@item/spell/sheet.ts` |
+| `treasure` | `TreasureSheetPF2e` | `@item/treasure/sheet.ts` |
+| `weapon` | `WeaponSheetPF2e` | `@item/weapon/sheet.ts` |
+| `lore`, `spellcastingEntry` | `ItemSheetPF2e` | `@item/base/sheet/sheet.ts` |
+
+<Tip>
+  Item sheets display a **Rules** tab that lets you inspect and edit the rule elements on an item. This tab is hidden by default to avoid overwhelming new users. Enable it by turning on the **"Advanced Rule Element UI"** system setting in Foundry's Configure Settings dialog under the PF2e System category.
+</Tip>
+
+## Custom applications
+
+Beyond the standard document sheets, the system includes a set of custom application windows for specific workflows. All custom apps live under `src/module/apps/`.
+
+### CompendiumBrowser
+
+**Location:** `src/module/apps/compendium-browser/`
+
+A searchable, filterable browser for all compendium content. Built on `SvelteApplicationMixin(ApplicationV2)` and renders at 800×700 by default. The browser has seven built-in tabs:
+
+```typescript
+const dataTabsList = [
+  "action",
+  "bestiary",
+  "campaignFeature",
+  "equipment",
+  "feat",
+  "hazard",
+  "spell",
+] as const;
+```
+
+Each tab is an independent class (e.g., `browserTabs.Feats`, `browserTabs.Equipment`) that owns its own filter state and loads content from compendium packs lazily via `PackLoader`.
+
+Open the browser programmatically from the Foundry console or a macro:
+
+```typescript
+// Open to the default (last active) tab
+game.pf2e.compendiumBrowser.render(true);
+
+// Open directly to the spells tab
+game.pf2e.compendiumBrowser.openTab("spell");
+
+// Open with a pre-applied filter (e.g. show only cantrips)
+game.pf2e.compendiumBrowser.openTab("spell", { category: "cantrip" });
+```
+
+The browser's pack visibility is configurable per-pack via its settings app (`CompendiumBrowserSettingsApp`), letting GMs hide homebrew or third-party packs from search results.
+
+### EffectsPanel
+
+**Location:** `src/module/apps/effects-panel.ts`
+
+A frameless floating panel that displays active conditions and effects for the currently controlled token (or the logged-in user's assigned character when no token is selected). The panel auto-refreshes via a debounced `refresh()` call whenever the canvas selection changes or actor data updates.
+
+```typescript
+class EffectsPanel extends fa.api.HandlebarsApplicationMixin(fa.api.ApplicationV2) {
+  // Automatically tracks canvas.tokens.controlled[0]?.document
+  // or game.user?.character as a fallback
+}
+```
+
+Clicking an effect icon opens the item sheet; right-clicking provides a context menu to remove or edit the effect.
+
+### AttributeBuilder
+
+**Location:** `src/module/apps/attribute-builder/`
+
+A point-buy ability score assignment application used during character creation. Renders as a Svelte component. It reads the system's configured ability score generation method and constrains the point totals accordingly. Opened automatically when a new character is created and the build mode is set to "PC".
+
+### RollInspector
+
+**Location:** `src/module/apps/roll-inspector/`
+
+A developer and GM debugging tool for inspecting the full modifier stack that contributed to a roll. Displays each `Modifier`, its type, value, enabled/disabled state, and predicate. Built as a Svelte application.
+
+Open from any check roll message by clicking the roll formula, or programmatically:
+
+```typescript
+// The inspector is opened internally by the roll chat message context menu.
+// It receives the StatisticRollParameters and resolved ModifierPF2e[] list.
+```
+
+### ItemAttacher
+
+**Location:** `src/module/apps/item-attacher.ts`
+
+A prompt for selecting a physical item to receive an attachment (e.g., attaching a shield boss or a weapon rune to a weapon). Filters the actor's inventory to items that accept the attachable item:
+
+```typescript
+class ItemAttacher extends fa.api.HandlebarsApplicationMixin(fa.api.ApplicationV2) {
+  constructor({ item }: { item: PhysicalItemPF2e }) {
+    // Validates item.isAttachable
+    // Builds choices from actor inventory filtered by i.acceptsSubitem(item)
+  }
+}
+```
+
+Opened automatically when you drag an attachable item onto a compatible target in the sheet inventory.
+
+### WorldClock
+
+**Location:** `src/module/apps/world-clock/`
+
+An in-game clock application that displays and advances Foundry's world time in a Golarion calendar format. The clock is built on `HandlebarsApplicationMixin(ApplicationV2)` and uses the [Luxon](https://moment.github.io/luxon/) `DateTime` library for time calculations.
+
+- Displays date and time in the selected in-world calendar (Absalom Reckoning by default)
+- Supports time-of-day presets and manual advancement
+- Triggers animated darkness transitions via `animateDarkness()` when time advances past dawn/dusk thresholds
+
+Open via the scene controls toolbar or:
+
+```typescript
+game.pf2e.worldClock.render(true);
+```
+
+### SceneDarknessAdjuster
+
+**Location:** `src/module/apps/scene-darkness-adjuster.ts`
+
+A frameless slider control rendered in the scene controls area that lets GMs adjust the ambient darkness level of the current scene in real time. Uses the `nouislider` library for the drag handle. Only renders when a scene is currently viewed.
+
+```typescript
+class SceneDarknessAdjuster extends fa.api.ApplicationV2 {
+  static get instance(): SceneDarknessAdjuster {
+    // Singleton — always returns the same instance
+    return (this.#instance ??= new this());
+  }
+}
+```
+
+### MigrationSummary
+
+**Location:** `src/module/apps/migration-summary.ts`
+
+A dialog displayed to the GM after a data migration run completes. Summarizes which migrations were applied, whether any errors occurred, and provides links to the changelog. Shown automatically after Foundry loads when pending migrations were applied.
+
+### PickAThingPrompt
+
+**Location:** `src/module/apps/pick-a-thing-prompt/`
+
+A generic selection dialog built as a Svelte application. Presents a list of labeled options and resolves a Promise with the user's choice. Used throughout the system whenever a player or GM must pick one item from a list (e.g., choosing a skill to train from a feat, selecting a damage type for a modular weapon).
+
+```typescript
+// Internal usage pattern — the prompt resolves to the selected item or null
+const choice = await new PickAThingPrompt({
+  title: "Choose a skill",
+  choices: skillChoices,
+}).resolveSelection();
+```
+
+### TradeDialog
+
+**Location:** `src/module/apps/trade-dialog/`
+
+A Svelte application for transferring items between actors. Lets the user specify quantity and confirm before the transfer is committed. Opened when a player drags an item from their sheet to another character's token.
+
+### SidebarPF2e
+
+**Location:** `src/module/apps/sidebar/`
+
+Customizations to Foundry's built-in sidebar tabs. The system extends several sidebar tab classes:
+
+| Module | Purpose |
+|---|---|
+| `actor-directory.ts` | Adds PF2e-specific context menu entries to the Actors sidebar |
+| `item-directory.ts` | Adds item-specific context menu entries to the Items sidebar |
+| `compendium-directory.ts` | Customizes pack display and adds quick-open actions |
+| `chat-log.ts` | Adds PF2e roll message controls and chat command handling |
+| `encounter-tracker.ts` | Extends the Combat Tracker with PF2e initiative and turn actions |
